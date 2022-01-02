@@ -1,0 +1,17 @@
+[package]
+name = "diag"
+version = "0.1.0"
+edition = "2021"
+authors = ["Adam Szkoda <adaszko@gmail.com>"]
+description = "Fixed-size Directed Acyclic Graphs with integer vertices represented as a strictly upper triangular matrix stored in a bit set"
+homepage = "https://github.com/adaszko/diag"
+repository = "https://github.com/adaszko/diag"
+keywords = ["dag", "graph"]
+license = "GPL-3.0"
+
+
+[dependencies]
+fixedbitset = "0.4.0"
+# Quickcheck should be a crate feature dep
+quickcheck = "1.0.3"
+thiserror = "1.0.30"
