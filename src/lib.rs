@@ -36,9 +36,10 @@
 //! * Bare minimum of provided graph algorithms: neighbours, traversals.
 
 use std::{io::Write, collections::{HashSet}};
-
-use quickcheck::{Gen, Arbitrary};
 use thiserror::Error;
+
+#[cfg(feature = "qc")]
+use quickcheck::{Gen, Arbitrary};
 
 mod strictly_upper_triangular_matrix;
 use strictly_upper_triangular_matrix::StrictlyUpperTriangularMatrix;
@@ -203,6 +204,7 @@ impl DirectedAcyclicGraph {
     }
 }
 
+#[cfg(feature = "qc")]
 impl Arbitrary for DirectedAcyclicGraph {
     fn arbitrary(g: &mut Gen) -> Self {
         let vertex_count = g.size();
@@ -249,7 +251,7 @@ impl Arbitrary for DirectedAcyclicGraph {
 mod tests {
     use std::collections::HashMap;
 
-    use quickcheck::quickcheck;
+    use quickcheck::{quickcheck, Arbitrary, Gen};
     use super::*;
 
     #[test]
