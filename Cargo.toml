@@ -1,6 +1,6 @@
 [package]
 name = "diag"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 authors = ["Adam Szkoda <adaszko@gmail.com>"]
 description = "Fixed-size Directed Acyclic Graphs with integer vertices represented as a strictly upper triangular matrix stored in a bit set"
