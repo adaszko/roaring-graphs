@@ -1,10 +1,49 @@
+//! [Directed Acyclic
+//! Graphs](https://en.wikipedia.org/wiki/Directed_acyclic_graph) (DAGs)
+//! represented as [Strictly Upper Triangular
+//! matrices](https://mathworld.wolfram.com/StrictlyUpperTriangularMatrix.html).
+//!
+//! There are several assumptions this crate imposes on *your* code you may want
+//! to review before committing to it:
+//!
+//! 1. The number of vertices is determined at construction time and
+//!    growing/shrinking is generally an expensive operation.
+//! 1. DAG vertices are integers (`usize` to be precise).  Although you can
+//!    always maintain a bidirectional mapping from your domain to integers.
+//! 1. For every edge `(u, v)` in the DAG, it holds that `u < v`.  This is to
+//!    avoid forming cycles.
+//!
+//! In exchange for these assumptions you get these useful properties:
+//! * It's not possible to represent a graph with the [`DirectedAcyclicGraph`]
+//!   data type that's not a DAG, contrary to a fully general graph
+//!   representation.
+//! * The representation is *compact*: edges are just bits in a bit set.  Note
+//!   that currently, we use `|v|^2` bits, instead of the optimal `(|v|^2 - |v|)
+//!   / 2` bits.  This will most likely be optimized in the future.
+//! * The representation is CPU-cache-friendly, so traversals are fast.
+//! * Generating a random DAG is a linear operation, contrary to a fully general
+//!   graph representations.  That was the original motivation for writing this
+//!   crate.  It can be used with
+//!   [quickcheck](https://crates.io/crates/quickcheck) efficiently.  In fact,
+//!   [`DirectedAcyclicGraph`] implements [`quickcheck::Arbitrary`].
+//!
+//! ## Missing features
+//!
+//! * No support for storing anything in the vertices.  This may be done on the
+//!   caller's side with a bidirectional mapping to integer vertices.
+//! * No support for assigning weights to either edges or vertices.  Again, this
+//!   may be done on the caller's side with a bidirectional mapping.
+//! * Bare minimum of provided graph algorithms: neighbours, traversals.
+
 use std::{io::Write, collections::{HashSet}};
 
 use quickcheck::{Gen, Arbitrary};
 use thiserror::Error;
 
 mod strictly_upper_triangular_matrix;
-use strictly_upper_triangular_matrix::{StrictlyUpperTriangularMatrix, EdgesIterator};
+use strictly_upper_triangular_matrix::StrictlyUpperTriangularMatrix;
+pub use strictly_upper_triangular_matrix::EdgesIterator;
+
 
 #[derive(Error, Debug)]
 pub enum DiagError {
@@ -15,11 +54,6 @@ pub enum DiagError {
 
 type Result<T> = std::result::Result<T, DiagError>;
 
-
-
-/// Invariant: i < j
-/// Assumption: Edges only ever go from a "smaller" node to a "greater" node (by their indexes).
-/// That assumption allows for avoiding cycles.
 
 
 #[derive(Clone)]
@@ -112,6 +146,7 @@ impl DirectedAcyclicGraph {
         }
     }
 
+    /// Outputs the DAG in the [Graphviz DOT](https://graphviz.org/) format.
     pub fn to_dot<W: Write>(&self, output: &mut W) -> Result<()> {
         writeln!(output, "digraph dag_{} {{", self.vertex_count())?;
 
