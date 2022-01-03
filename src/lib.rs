@@ -165,31 +165,31 @@ impl DirectedAcyclicGraph {
         self.adjacency_matrix.size()
     }
 
-    pub fn get_edge(&self, i: usize, j: usize) -> bool {
-        assert!(i < self.vertex_count());
-        assert!(j < self.vertex_count());
-        assert!(i < j);
-        self.adjacency_matrix.get(i, j)
+    pub fn get_edge(&self, u: usize, v: usize) -> bool {
+        assert!(u < self.vertex_count());
+        assert!(v < self.vertex_count());
+        assert!(u < v);
+        self.adjacency_matrix.get(u, v)
     }
 
-    pub fn set_edge(&mut self, i: usize, j: usize, exists: bool) {
-        assert!(i < self.vertex_count());
-        assert!(j < self.vertex_count());
-        assert!(i < j);
-        self.adjacency_matrix.set(i, j, exists);
+    pub fn set_edge(&mut self, u: usize, v: usize, exists: bool) {
+        assert!(u < self.vertex_count());
+        assert!(v < self.vertex_count());
+        assert!(u < v);
+        self.adjacency_matrix.set(u, v, exists);
     }
 
     pub fn iter_edges(&self) -> EdgesIterator {
         self.adjacency_matrix.iter_ones()
     }
 
-    pub fn iter_neighbours(&self, i: usize) -> NeighboursIterator {
-        assert!(i < self.vertex_count());
+    pub fn iter_neighbours(&self, u: usize) -> NeighboursIterator {
+        assert!(u < self.vertex_count());
         NeighboursIterator {
             adjacency_matrix: &self.adjacency_matrix,
-            left_vertex: i,
+            left_vertex: u,
             right_vertex: 0,
-            max_right_vertex: (self.vertex_count() - i - 1),
+            max_right_vertex: (self.vertex_count() - u - 1),
         }
     }
 
@@ -248,9 +248,9 @@ impl Arbitrary for DirectedAcyclicGraph {
         let vertex_count = g.size();
         let mut dag = DirectedAcyclicGraph::empty(vertex_count);
 
-        for i in 0..vertex_count {
-            for j in (i+1)..vertex_count {
-                dag.set_edge(i, j, Arbitrary::arbitrary(g));
+        for u in 0..vertex_count {
+            for v in (u+1)..vertex_count {
+                dag.set_edge(u, v, Arbitrary::arbitrary(g));
             }
         }
 
@@ -266,17 +266,17 @@ impl Arbitrary for DirectedAcyclicGraph {
 
         let left_vertex_count = vertex_count / 2;
         let mut left = DirectedAcyclicGraph::empty(left_vertex_count);
-        for i in 0..left_vertex_count {
-            for j in (i+1)..left_vertex_count {
-                left.set_edge(i, j, self.get_edge(i, j));
+        for u in 0..left_vertex_count {
+            for v in (u+1)..left_vertex_count {
+                left.set_edge(u, v, self.get_edge(u, v));
             }
         }
 
         let right_vertex_count = vertex_count - left_vertex_count;
         let mut right = DirectedAcyclicGraph::empty(right_vertex_count);
-        for i in left_vertex_count..vertex_count {
-            for j in (left_vertex_count+1)..vertex_count {
-                right.set_edge(i - left_vertex_count, j - left_vertex_count, self.get_edge(i, j));
+        for u in left_vertex_count..vertex_count {
+            for v in (left_vertex_count+1)..vertex_count {
+                right.set_edge(u - left_vertex_count, v - left_vertex_count, self.get_edge(u, v));
             }
         }
 
