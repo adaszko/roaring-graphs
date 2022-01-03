@@ -302,7 +302,6 @@ mod tests {
 
     #[test]
     fn topological_order_of_divisibility_poset() {
-        let mut dag = DirectedAcyclicGraph::empty(12);
         let edges: Vec<(usize, usize)> = vec![
             (1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8), (1, 9), (1, 10), (1, 11), (1, 12),
             (2, 4), (2, 6), (2, 8), (2, 10), (2, 12),
@@ -310,12 +309,8 @@ mod tests {
             (4, 8), (4, 12),
             (5, 10),
             (6, 12)
-        ];
-
-        for (u, v) in edges {
-            dag.set_edge(u-1, v-1, true);
-        }
-
+        ].into_iter().map(|(u, v)| (u - 1, v - 1)).collect();
+        let dag = DirectedAcyclicGraph::from_edges(12, &edges);
         let topological_order: Vec<(usize, usize)> = dag.iter_topologically_ordered_edges().collect();
         println!("{:?}", topological_order);
     }
