@@ -3,20 +3,21 @@
 //! represented as [Strictly Upper Triangular
 //! matrices](https://mathworld.wolfram.com/StrictlyUpperTriangularMatrix.html).
 //!
-//! There are several assumptions this crate imposes on *your* code you may want
-//! to review before committing to it:
+//! There are several assumptions this crate imposes on *your* code:
 //!
 //! 1. The number of vertices is determined at construction time and
 //!    growing/shrinking is generally an expensive operation.
 //! 1. DAG vertices are integers (`usize` to be precise).  Although you can
-//!    always maintain a bidirectional mapping from your domain to integers.
-//! 1. For every edge `(u, v)` in the DAG, it holds that `u < v`.  This is to
-//!    avoid forming cycles.
+//!    always maintain a bidirectional mapping from your domain to integers if
+//!    you need some other type.
+//! 1. Vertices numbering starts at 0.
+//! 1. For every edge `(u, v)` in the DAG, it holds that `u < v`.  This ensures
+//!    there are no cycles.
 //!
 //! In exchange for these assumptions you get these useful properties:
 //! * It's not possible to represent a graph with the [`DirectedAcyclicGraph`]
 //!   data type that's not a DAG, contrary to a fully general graph
-//!   representation.
+//!   representation, so fewer runtime bugs.
 //! * The representation is *compact*: edges are just bits in a bit set.  Note
 //!   that currently, we use `|v|^2` bits, instead of the optimal `(|v|^2 - |v|)
 //!   / 2` bits.  This will most likely be optimized in the future.
@@ -25,7 +26,8 @@
 //!   graph representations.  That was the original motivation for writing this
 //!   crate.  It can be used with
 //!   [quickcheck](https://crates.io/crates/quickcheck) efficiently.  In fact,
-//!   [`DirectedAcyclicGraph`] implements [`quickcheck::Arbitrary`].
+//!   [`DirectedAcyclicGraph`] implements [`quickcheck::Arbitrary`] (with
+//!   meaningful shrinking).
 //!
 //! ## Missing features
 //!
@@ -42,7 +44,7 @@ use thiserror::Error;
 use quickcheck::{Gen, Arbitrary};
 
 mod strictly_upper_triangular_matrix;
-use strictly_upper_triangular_matrix::StrictlyUpperTriangularMatrix;
+pub use strictly_upper_triangular_matrix::StrictlyUpperTriangularMatrix;
 pub use strictly_upper_triangular_matrix::EdgesIterator;
 
 
@@ -96,6 +98,50 @@ impl<'a> Iterator for NeighboursIterator<'a> {
                 return Some(result);
             }
             self.right_vertex += 1;
+        }
+        None
+    }
+}
+
+
+pub struct TopologicallyOrderedEdgesIterator<'a> {
+    adjacency_matrix: &'a StrictlyUpperTriangularMatrix,
+    vertices_with_no_incoming_edges: Vec<usize>,
+    to_visit: Vec<(usize, usize)>,
+    visited: HashSet<(usize, usize)>,
+}
+
+impl<'a> TopologicallyOrderedEdgesIterator<'a> {
+    fn iter_neighbours(&self, u: usize) -> NeighboursIterator {
+        NeighboursIterator {
+            adjacency_matrix: &self.adjacency_matrix,
+            left_vertex: u,
+            right_vertex: 0,
+            max_right_vertex: self.adjacency_matrix.size() - u - 1,
+        }
+    }
+}
+
+impl<'a> Iterator for TopologicallyOrderedEdgesIterator<'a> {
+    type Item = (usize, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(u) = self.vertices_with_no_incoming_edges.pop() {
+            let neighbours: Vec<usize> = self.iter_neighbours(u).collect();
+            for v in neighbours {
+                self.to_visit.push((u, v));
+            }
+            while let Some((u, v)) = self.to_visit.pop() {
+                if self.visited.contains(&(u, v)) {
+                    continue;
+                }
+                let neighbours: Vec<usize> = self.iter_neighbours(v).collect();
+                for z in neighbours {
+                    self.to_visit.push((v, z));
+                }
+                self.visited.insert((u, v));
+                return Some((u, v));
+            }
         }
         None
     }
@@ -166,9 +212,11 @@ impl DirectedAcyclicGraph {
         Ok(())
     }
 
-    pub fn get_topologically_ordered_pairs(&self) -> Vec<(usize, usize)> {
-        let mut result: Vec<(usize, usize)> = Vec::new();
-
+    /// Convienient function when the DAG represents a [Partially Ordered
+    /// Set](https://en.wikipedia.org/wiki/Partially_ordered_set).  It's often
+    /// useful to enumerate all the Poset pairs in a fashion that preserves the
+    /// underlying order.
+    pub fn iter_topologically_ordered_edges(&self) -> TopologicallyOrderedEdgesIterator {
         let vertex_count = self.vertex_count();
 
         let mut incoming_edges_count: Vec<usize> = vec![0; vertex_count];
@@ -176,31 +224,21 @@ impl DirectedAcyclicGraph {
             incoming_edges_count[right] += 1;
         });
 
-        let mut nodes_with_no_incoming_edges: Vec<usize> = incoming_edges_count
+        let vertices_with_no_incoming_edges: Vec<usize> = incoming_edges_count
             .into_iter()
             .enumerate()
             .filter(|(_, indegree)| *indegree == 0)
             .map(|(vertex, _)| vertex)
             .collect();
-        let mut to_visit: Vec<(usize, usize)> = Vec::with_capacity(vertex_count);
-        let mut visited: HashSet<(usize, usize)> = HashSet::with_capacity(vertex_count);
-        while let Some(u) = nodes_with_no_incoming_edges.pop() {
-            for v in self.iter_neighbours(u) {
-                to_visit.push((u, v));
-            }
-            while let Some((u, v)) = to_visit.pop() {
-                if visited.contains(&(u, v)) {
-                    continue;
-                }
-                result.push((u, v));
-                for z in self.iter_neighbours(v) {
-                    to_visit.push((v, z));
-                }
-                visited.insert((u, v));
-            }
-        }
+        let to_visit: Vec<(usize, usize)> = Vec::with_capacity(vertex_count);
+        let visited: HashSet<(usize, usize)> = HashSet::with_capacity(vertex_count);
 
-        result
+        TopologicallyOrderedEdgesIterator {
+            adjacency_matrix: &self.adjacency_matrix,
+            vertices_with_no_incoming_edges,
+            to_visit,
+            visited,
+        }
     }
 }
 
@@ -260,6 +298,26 @@ mod tests {
         let mut dag = DirectedAcyclicGraph::empty(2);
         assert_eq!(dag.get_edge(0, 0), false);
         dag.set_edge(0, 0, true);
+    }
+
+    #[test]
+    fn topological_order_of_divisibility_poset() {
+        let mut dag = DirectedAcyclicGraph::empty(12);
+        let edges: Vec<(usize, usize)> = vec![
+            (1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8), (1, 9), (1, 10), (1, 11), (1, 12),
+            (2, 4), (2, 6), (2, 8), (2, 10), (2, 12),
+            (3, 6), (3, 9), (3, 12),
+            (4, 8), (4, 12),
+            (5, 10),
+            (6, 12)
+        ];
+
+        for (u, v) in edges {
+            dag.set_edge(u-1, v-1, true);
+        }
+
+        let topological_order: Vec<(usize, usize)> = dag.iter_topologically_ordered_edges().collect();
+        println!("{:?}", topological_order);
     }
 
     fn prop_dag_reduces_to_nothing(mut dag: DirectedAcyclicGraph) -> bool {
