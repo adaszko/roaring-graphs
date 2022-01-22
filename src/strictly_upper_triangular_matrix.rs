@@ -31,6 +31,30 @@ impl<'a> Iterator for EdgesIterator<'a> {
 }
 
 
+pub struct NeighboursIterator<'a> {
+    adjacency_matrix: &'a StrictlyUpperTriangularMatrix,
+    left_vertex: usize,
+    right_vertex: usize,
+}
+
+
+impl<'a> Iterator for NeighboursIterator<'a> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while self.right_vertex < self.adjacency_matrix.size() {
+            if self.adjacency_matrix.get(self.left_vertex, self.right_vertex) {
+                let result = self.right_vertex;
+                self.right_vertex += 1;
+                return Some(result);
+            }
+            self.right_vertex += 1;
+        }
+        None
+    }
+}
+
+
 impl StrictlyUpperTriangularMatrix {
     pub fn zeroed(size: usize) -> Self {
         // XXX: The optimal capacity is (size * size - size) / 2
@@ -55,9 +79,9 @@ impl StrictlyUpperTriangularMatrix {
 
     fn index_from_row_column(&self, i: usize, j: usize) -> usize {
         let m = self.size();
-        assert!(i < m);
-        assert!(j < m);
-        assert!(i < j);
+        assert!(i < m, "assertion failed: i < m; i={}, m={}", i, m);
+        assert!(j < m, "assertion failed: j < m; j={}, m={}", j, m);
+        assert!(i < j, "assertion failed: i < j; i={}, j={}", i, j);
         m * i + j
     }
 
@@ -76,24 +100,21 @@ impl StrictlyUpperTriangularMatrix {
     pub fn iter_ones(&self) -> EdgesIterator {
         EdgesIterator::new(self.size, &self.matrix)
     }
+
+    pub fn iter_neighbours(&self, u: usize) -> NeighboursIterator {
+        assert!(u < self.size());
+        NeighboursIterator {
+            adjacency_matrix: self,
+            left_vertex: u,
+            right_vertex: u + 1,
+        }
+    }
 }
 
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    #[should_panic = "assertion failed: i < j"]
-    fn positive_test_2x2_matrix() {
-        let mut matrix = StrictlyUpperTriangularMatrix::zeroed(2);
-        assert_eq!(matrix.get(0, 0), false);
-        let ones: Vec<(usize, usize)> = matrix.iter_ones().collect();
-        assert_eq!(ones, vec![]);
-        matrix.set(0, 0, true);
-        let ones: Vec<(usize, usize)> = matrix.iter_ones().collect();
-        assert_eq!(ones, vec![(0, 0)]);
-    }
 
     #[test]
     fn positive_test_3x3_matrix() {

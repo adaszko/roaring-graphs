@@ -3,28 +3,36 @@
 //! represented as [Strictly Upper Triangular
 //! matrices](https://mathworld.wolfram.com/StrictlyUpperTriangularMatrix.html).
 //!
+//! This crate is best suited for cases when you need to work with graphs and
+//! you know upfront they are going to fall within the the DAG category. In such
+//! case, the genericity of other graph crates may result in runtime bugs that
+//! could have been avoided given a more restrictive graph representation. Some
+//! graph algorithms also have better time complexity if you assume you're
+//! working with a certain class of graphs.
+//!
 //! There are several assumptions this crate imposes on *your* code:
 //!
-//! 1. The number of vertices is determined at construction time and
-//!    growing/shrinking is generally an expensive operation.
-//! 1. DAG vertices are integers (`usize` to be precise).  Although you can
-//!    always maintain a bidirectional mapping from your domain to integers if
-//!    you need some other type.
+//! 1. DAG vertices are integer numbers (`usize`) which is used to trivially
+//!    test whether adding an edge would form a cycle.  It is simply stipulated
+//!    that an edge can only go from a node `u` to a node `v` when `u < v`.
+//!    Otherwise we panic. [^1]
 //! 1. Vertices numbering starts at 0.
-//! 1. For every edge `(u, v)` in the DAG, it holds that `u < v`.  This ensures
-//!    there are no cycles.
+//! 1. The number of vertices is determined at construction time and
+//!    growing/shrinking generally requires a new graph to be constructed.
 //!
 //! In exchange for these assumptions you get these useful properties:
 //! * It's not possible to represent a graph with the [`DirectedAcyclicGraph`]
 //!   data type that's not a DAG, contrary to a fully general graph
-//!   representation, so fewer runtime bugs.
-//! * The representation is *compact*: edges are just bits in a bit set.  Note
-//!   that currently, we use `|v|^2` bits, instead of the optimal `(|v|^2 - |v|)
-//!   / 2` bits.  This will most likely be optimized in the future.
-//! * The representation is CPU-cache-friendly, so traversals are fast.
+//!   representation like adjacency lists or a square matrix.  IOW: Every
+//!   strictly upper triangular matrix represents *some* valid DAG.  At the same
+//!   time, every DAG is represented by some strictly upper triangular matrix.
+//! * The representation is *compact*: edges are just bits in a bit set.
+//!   Iteration over the edges of some vertex is just iteration over bits in a
+//!   bit set, so it's CPU-cache-friendly. That's nod at [Data Oriented
+//!   Design](https://en.wikipedia.org/wiki/Data-oriented_design). [^2]
 //! * Generating a random DAG is a linear operation, contrary to a fully general
-//!   graph representations.  That was the original motivation for writing this
-//!   crate.  It can be used with
+//!   graph representation.  That was actually the original motivation for
+//!   writing this crate.  It can be used with
 //!   [quickcheck](https://crates.io/crates/quickcheck) efficiently.  In fact,
 //!   [`DirectedAcyclicGraph`] implements [`quickcheck::Arbitrary`] (with
 //!   meaningful shrinking).
@@ -35,28 +43,28 @@
 //!   caller's side with a bidirectional mapping to integer vertices.
 //! * No support for assigning weights to either edges or vertices.  Again, this
 //!   may be done on the caller's side with a bidirectional mapping.
-//! * Bare minimum of provided graph algorithms: neighbours, traversals.
+//!
+//!   [^1]: You can always maintain a bidirectional mapping from your domain to
+//!    integers if you need some other type.
+//!
+//!   [^2]: Note that currently, the implementation uses `|v|^2` bits, instead
+//!   of the optimal `(|v|^2 - |v|) / 2` bits.  This will most likely be
+//!   optimized in the future.
+//!
+//! # Entry points
+//!
+//! See either [`DirectedAcyclicGraph::empty`] or
+//! [`DirectedAcyclicGraph::from_edges`] for the "entry point" to this crate.
 
-use std::{io::Write, collections::{HashSet}};
-use thiserror::Error;
+use std::{io::Write, collections::{HashSet, VecDeque}};
 
 #[cfg(feature = "qc")]
 use quickcheck::{Gen, Arbitrary};
 
 mod strictly_upper_triangular_matrix;
 pub use strictly_upper_triangular_matrix::StrictlyUpperTriangularMatrix;
+pub use strictly_upper_triangular_matrix::NeighboursIterator;
 pub use strictly_upper_triangular_matrix::EdgesIterator;
-
-
-#[derive(Error, Debug)]
-pub enum DiagError {
-    #[error("I/0 Error")]
-    IoError(#[from] std::io::Error),
-}
-
-
-type Result<T> = std::result::Result<T, DiagError>;
-
 
 
 #[derive(Clone)]
@@ -79,71 +87,36 @@ impl std::fmt::Debug for DirectedAcyclicGraph {
 }
 
 
-pub struct NeighboursIterator<'a> {
-    adjacency_matrix: &'a StrictlyUpperTriangularMatrix,
-    left_vertex: usize,
-    right_vertex: usize,
-    max_right_vertex: usize,
-}
-
-
-impl<'a> Iterator for NeighboursIterator<'a> {
-    type Item = usize;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while self.right_vertex <= self.max_right_vertex {
-            if self.adjacency_matrix.get(self.left_vertex, self.right_vertex) {
-                let result = self.right_vertex;
-                self.right_vertex += 1;
-                return Some(result);
-            }
-            self.right_vertex += 1;
-        }
-        None
-    }
-}
-
-
-pub struct TopologicallyOrderedEdgesIterator<'a> {
+pub struct OrderedPosetPairsIterator<'a> {
     adjacency_matrix: &'a StrictlyUpperTriangularMatrix,
     vertices_with_no_incoming_edges: Vec<usize>,
-    to_visit: Vec<(usize, usize)>,
+    to_visit: VecDeque<(usize, usize)>,
     visited: HashSet<(usize, usize)>,
 }
 
-impl<'a> TopologicallyOrderedEdgesIterator<'a> {
-    fn iter_neighbours(&self, u: usize) -> NeighboursIterator {
-        NeighboursIterator {
-            adjacency_matrix: &self.adjacency_matrix,
-            left_vertex: u,
-            right_vertex: 0,
-            max_right_vertex: self.adjacency_matrix.size() - u - 1,
-        }
-    }
-}
-
-impl<'a> Iterator for TopologicallyOrderedEdgesIterator<'a> {
+impl<'a> Iterator for OrderedPosetPairsIterator<'a> {
     type Item = (usize, usize);
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some(u) = self.vertices_with_no_incoming_edges.pop() {
-            let neighbours: Vec<usize> = self.iter_neighbours(u).collect();
-            for v in neighbours {
-                self.to_visit.push((u, v));
-            }
-            while let Some((u, v)) = self.to_visit.pop() {
+        loop {
+            while let Some((u, v)) = self.to_visit.pop_front() {
                 if self.visited.contains(&(u, v)) {
                     continue;
                 }
-                let neighbours: Vec<usize> = self.iter_neighbours(v).collect();
-                for z in neighbours {
-                    self.to_visit.push((v, z));
-                }
+                let neighbours: Vec<usize> = self.adjacency_matrix.iter_neighbours(v).collect();
+                self.to_visit.extend(neighbours.into_iter().map(|z| (v, z)));
                 self.visited.insert((u, v));
                 return Some((u, v));
             }
+
+            if let Some(u) = self.vertices_with_no_incoming_edges.pop() {
+                let neighbours: Vec<usize> = self.adjacency_matrix.iter_neighbours(u).collect();
+                self.to_visit.extend(neighbours.into_iter().map(|v| (u, v)));
+            }
+            else {
+                return None;
+            }
         }
-        None
     }
 }
 
@@ -155,9 +128,13 @@ impl DirectedAcyclicGraph {
         }
     }
 
-    pub fn from_edges(size: usize, edges: &[(usize, usize)]) -> Self {
+    /// Constructs a DAG from a list of edges.
+    ///
+    /// Requires `u < vertex_count && v < vertex_count` for every edge `(u, v)`
+    /// in `edges`.  Panics otherwise.
+    pub fn from_edges(vertex_count: usize, edges: &[(usize, usize)]) -> Self {
         Self {
-            adjacency_matrix: StrictlyUpperTriangularMatrix::from_ones(size, edges),
+            adjacency_matrix: StrictlyUpperTriangularMatrix::from_ones(vertex_count, edges),
         }
     }
 
@@ -165,6 +142,7 @@ impl DirectedAcyclicGraph {
         self.adjacency_matrix.size()
     }
 
+    /// Requires `u < v`.  Panics otherwise.
     pub fn get_edge(&self, u: usize, v: usize) -> bool {
         assert!(u < self.vertex_count());
         assert!(v < self.vertex_count());
@@ -172,6 +150,7 @@ impl DirectedAcyclicGraph {
         self.adjacency_matrix.get(u, v)
     }
 
+    /// Requires `u < v`.  Panics otherwise.
     pub fn set_edge(&mut self, u: usize, v: usize, exists: bool) {
         assert!(u < self.vertex_count());
         assert!(v < self.vertex_count());
@@ -183,18 +162,14 @@ impl DirectedAcyclicGraph {
         self.adjacency_matrix.iter_ones()
     }
 
-    pub fn iter_neighbours(&self, u: usize) -> NeighboursIterator {
-        assert!(u < self.vertex_count());
-        NeighboursIterator {
-            adjacency_matrix: &self.adjacency_matrix,
-            left_vertex: u,
-            right_vertex: 0,
-            max_right_vertex: (self.vertex_count() - u - 1),
-        }
+    /// Iterates over the vertices `v` such that there's an edge `(u, v)` in the
+    /// DAG.
+    pub fn iter_neighbours(&self, v: usize) -> NeighboursIterator {
+        self.adjacency_matrix.iter_neighbours(v)
     }
 
     /// Outputs the DAG in the [Graphviz DOT](https://graphviz.org/) format.
-    pub fn to_dot<W: Write>(&self, output: &mut W) -> Result<()> {
+    pub fn to_dot<W: Write>(&self, output: &mut W) -> std::result::Result<(), std::io::Error> {
         writeln!(output, "digraph dag_{} {{", self.vertex_count())?;
 
         let elements: Vec<usize> = (0..self.vertex_count()).collect();
@@ -212,11 +187,11 @@ impl DirectedAcyclicGraph {
         Ok(())
     }
 
-    /// Convienient function when the DAG represents a [Partially Ordered
-    /// Set](https://en.wikipedia.org/wiki/Partially_ordered_set).  It's often
-    /// useful to enumerate all the Poset pairs in a fashion that preserves the
+    /// When the DAG represents a [Partially Ordered
+    /// Set](https://en.wikipedia.org/wiki/Partially_ordered_set), it's useful
+    /// to enumerate all the Poset pairs in a fashion that preserves the
     /// underlying order.
-    pub fn iter_topologically_ordered_edges(&self) -> TopologicallyOrderedEdgesIterator {
+    pub fn iter_ordered_poset_pairs(&self) -> OrderedPosetPairsIterator {
         let vertex_count = self.vertex_count();
 
         let mut incoming_edges_count: Vec<usize> = vec![0; vertex_count];
@@ -230,10 +205,10 @@ impl DirectedAcyclicGraph {
             .filter(|(_, indegree)| *indegree == 0)
             .map(|(vertex, _)| vertex)
             .collect();
-        let to_visit: Vec<(usize, usize)> = Vec::with_capacity(vertex_count);
+        let to_visit: VecDeque<(usize, usize)> = VecDeque::with_capacity(vertex_count);
         let visited: HashSet<(usize, usize)> = HashSet::with_capacity(vertex_count);
 
-        TopologicallyOrderedEdgesIterator {
+        OrderedPosetPairsIterator {
             adjacency_matrix: &self.adjacency_matrix,
             vertices_with_no_incoming_edges,
             to_visit,
@@ -287,13 +262,13 @@ impl Arbitrary for DirectedAcyclicGraph {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
     use quickcheck::{quickcheck, Arbitrary, Gen};
     use super::*;
 
     #[test]
-    #[should_panic = "assertion failed: i < j"]
+    #[should_panic = "assertion failed: u < v"]
     fn negative_test_smallest_dag() {
         let mut dag = DirectedAcyclicGraph::empty(2);
         assert_eq!(dag.get_edge(0, 0), false);
@@ -301,20 +276,22 @@ mod tests {
     }
 
     #[test]
-    fn topological_order_of_divisibility_poset() {
-        let edges: Vec<(usize, usize)> = vec![
+    fn divisibility_poset_of_12_ordered_pairs() {
+        let divisibility_poset_pairs: Vec<(usize, usize)> = vec![
             (1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8), (1, 9), (1, 10), (1, 11), (1, 12),
             (2, 4), (2, 6), (2, 8), (2, 10), (2, 12),
             (3, 6), (3, 9), (3, 12),
             (4, 8), (4, 12),
             (5, 10),
             (6, 12)
-        ].into_iter().map(|(u, v)| (u - 1, v - 1)).collect();
-        let dag = DirectedAcyclicGraph::from_edges(12, &edges);
-        let topological_order: Vec<(usize, usize)> = dag.iter_topologically_ordered_edges().collect();
-        println!("{:?}", topological_order);
+        ];
+        let dag = DirectedAcyclicGraph::from_edges(12+1, &divisibility_poset_pairs);
+        let total_order: Vec<(usize, usize)> = dag.iter_ordered_poset_pairs().collect();
+        println!("{:?}", total_order);
+        assert_eq!(total_order, divisibility_poset_pairs);
     }
 
+    // This mostly ensures `iter_edges()` really returns *all* the edges.
     fn prop_dag_reduces_to_nothing(mut dag: DirectedAcyclicGraph) -> bool {
         let mut edges: Vec<(usize, usize)> = dag.iter_edges().collect();
         while let Some((left, right)) = edges.pop() {
@@ -331,112 +308,86 @@ mod tests {
         }
     }
 
+    /// Does not include the trivial divisors: k | k for every integer k.
     #[derive(Clone, Debug)]
-    struct DivisibilityPoset {
-        seed: usize,
-        adjacency_lists: HashMap<usize, Vec<usize>>,
+    struct IntegerDivisibilityPoset {
+        number: usize,
+        divisors_of: BTreeMap<usize, Vec<usize>>,
     }
 
-    impl DivisibilityPoset {
-        fn get_divisors_adjacency_lists(n: usize) -> HashMap<usize, Vec<usize>> {
-            let mut result: HashMap<usize, Vec<usize>> = HashMap::new();
-            let mut stack = vec![n];
-            while let Some(k) = stack.pop() {
-                if result.contains_key(&k) {
-                    continue
+    impl IntegerDivisibilityPoset {
+        fn get_divisors(number: usize) -> BTreeMap<usize, Vec<usize>> {
+            let mut result: BTreeMap<usize, Vec<usize>> = Default::default();
+            let mut numbers: VecDeque<usize> = vec![number].into();
+            while let Some(n) = numbers.pop_front() {
+                let divisors_of_n: Vec<usize> = (1..n/2+1).filter(|d| n % d == 0).collect::<Vec<usize>>();
+                for divisor in &divisors_of_n {
+                    if !result.contains_key(&divisor) {
+                        numbers.push_back(*divisor);
+                    }
                 }
-                let partial = (1..k/2+1).filter(|d| k % d == 0).collect::<Vec<usize>>();
-                stack.extend(partial.iter());
-                result.insert(k, partial);
+                result.insert(n, divisors_of_n);
             }
             result
         }
 
-        fn new(n: usize) -> Self {
-            DivisibilityPoset {
-                seed: n,
-                adjacency_lists: Self::get_divisors_adjacency_lists(n),
+        fn of_number(number: usize) -> Self {
+            IntegerDivisibilityPoset {
+                number,
+                divisors_of: Self::get_divisors(number),
             }
-        }
-
-        fn get_max_element(&self) -> usize {
-            self.seed
         }
 
         fn get_pairs(&self) -> Vec<(usize, usize)> {
             let mut result = Vec::new();
 
-            let mut divisors: Vec<usize> = self.adjacency_lists.keys().cloned().collect();
-            divisors.sort();
-            divisors.reverse();
-
+            let divisors: Vec<usize> = self.divisors_of.keys().cloned().collect();
             for divisor in divisors {
-                let mut dividends: Vec<usize> = self.adjacency_lists[&divisor].to_vec();
-                dividends.sort();
-                dividends.reverse();
-                for dividend in dividends {
-                    result.push((dividend, divisor))
-                }
+                let dividends: Vec<usize> = self.divisors_of[&divisor].to_vec();
+                result.extend(dividends.iter().map(|dividend| (*dividend, divisor)));
             }
 
             result
         }
-
-        fn is_divisor_of(&self, left: usize, right: usize) -> bool {
-            if !self.adjacency_lists.contains_key(&left) {
-                return false
-            }
-
-            let mut visited = HashSet::new();
-            let mut stack = vec![left];
-            while let Some(divisor) = stack.pop() {
-                for dividend in &self.adjacency_lists[&divisor] {
-                    if *dividend == right {
-                        return true
-                    }
-                    if !visited.contains(dividend) {
-                        stack.push(*dividend)
-                    }
-                }
-                debug_assert!(visited.insert(divisor));
-            }
-
-            false
-        }
     }
 
-    impl Arbitrary for DivisibilityPoset {
+    impl Arbitrary for IntegerDivisibilityPoset {
         fn arbitrary(g: &mut Gen) -> Self {
             let range: Vec<usize> = (3..g.size()).collect();
-            DivisibilityPoset::new(*g.choose(&range).unwrap())
+            IntegerDivisibilityPoset::of_number(*g.choose(&range).unwrap())
         }
 
-        fn shrink(&self) -> Box<dyn Iterator<Item=DivisibilityPoset>> {
-            let seed = self.seed;
-            let divisors: Vec<usize> = self.adjacency_lists.keys().cloned().collect();
-            let result = divisors.into_iter().filter(move |d| *d < seed).map(DivisibilityPoset::new);
-            Box::new(result)
+        fn shrink(&self) -> Box<dyn Iterator<Item=IntegerDivisibilityPoset>> {
+            if self.number == 1 {
+                return Box::new(vec![].into_iter());
+            }
+            let new_number = self.number / 2;
+            let smaller_number: usize = *self.divisors_of.keys().filter(|&k| *k <= new_number).max().unwrap();
+            Box::new(vec![IntegerDivisibilityPoset::of_number(smaller_number)].into_iter())
         }
     }
 
-    fn prop_divisibility_poset_isomorphism(divisibility_poset: &DivisibilityPoset) -> bool {
-        let dag = DirectedAcyclicGraph::from_edges(divisibility_poset.get_max_element() + 1, &divisibility_poset.get_pairs());
+    fn prop_integer_divisibility_poset_isomorphism(integer_divisibility_poset: IntegerDivisibilityPoset) -> bool {
+        println!("{:10} {:?}", integer_divisibility_poset.number, integer_divisibility_poset.divisors_of);
 
-        for (left, right) in divisibility_poset.get_pairs() {
-            assert!(dag.get_edge(left, right));
+        let pairs = integer_divisibility_poset.get_pairs();
+
+        let dag = DirectedAcyclicGraph::from_edges(integer_divisibility_poset.number + 1, &pairs);
+
+        for (left, right) in pairs {
+            assert!(dag.get_edge(left, right), "({}, {})", left, right);
         }
 
         for (left, right) in dag.iter_edges() {
-            assert!(divisibility_poset.is_divisor_of(right, left));
+            assert!(right % left == 0, "({}, {})", left, right);
         }
 
         true
     }
 
-    quickcheck! {
-        fn prop_divisibility_poset_isomorphic_to_containment(divisibility_poset: DivisibilityPoset) -> bool {
-            println!("{:10} {} {:?}", divisibility_poset.seed, divisibility_poset.get_max_element(), divisibility_poset.adjacency_lists);
-            prop_divisibility_poset_isomorphism(&divisibility_poset)
-        }
+    #[test]
+    fn integer_divisibility_poset_isomorphism() {
+        let gen = quickcheck::Gen::new(1000);
+        quickcheck::QuickCheck::new().gen(gen).quickcheck(prop_integer_divisibility_poset_isomorphism as fn(IntegerDivisibilityPoset) -> bool);
     }
 }
