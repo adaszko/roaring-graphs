@@ -130,8 +130,8 @@ impl DirectedAcyclicGraph {
 
     /// Constructs a DAG from a list of edges.
     ///
-    /// Requires `u < vertex_count && v < vertex_count` for every edge `(u, v)`
-    /// in `edges`.  Panics otherwise.
+    /// Requires `u < vertex_count && v < vertex_count && u < v` for every edge
+    /// `(u, v)` in `edges`.  Panics otherwise.
     pub fn from_edges(vertex_count: usize, edges: &[(usize, usize)]) -> Self {
         Self {
             adjacency_matrix: StrictlyUpperTriangularMatrix::from_ones(vertex_count, edges),
