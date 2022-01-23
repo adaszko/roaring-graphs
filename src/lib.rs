@@ -341,10 +341,8 @@ mod tests {
         fn get_pairs(&self) -> Vec<(usize, usize)> {
             let mut result = Vec::new();
 
-            let divisors: Vec<usize> = self.divisors_of.keys().cloned().collect();
-            for divisor in divisors {
-                let dividends: Vec<usize> = self.divisors_of[&divisor].to_vec();
-                result.extend(dividends.iter().map(|dividend| (*dividend, divisor)));
+            for divisor in self.divisors_of.keys() {
+                result.extend(self.divisors_of[&divisor].iter().map(|dividend| (*dividend, *divisor)));
             }
 
             result
