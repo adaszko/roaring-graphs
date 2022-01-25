@@ -1,9 +1,9 @@
 [package]
 name = "diag"
-version = "0.4.0"
+version = "0.5.0"
 edition = "2021"
 authors = ["Adam Szkoda <adaszko@gmail.com>"]
-description = "Fixed-size Directed Acyclic Graphs with integer vertices represented as a strictly upper triangular matrix stored in a bit set"
+description = "Directed Acyclic Graphs with integer vertices represented as a Strictly Upper Triangular Matrix stored in a bit set"
 homepage = "https://github.com/adaszko/diag"
 repository = "https://github.com/adaszko/diag"
 keywords = ["dag", "graph"]

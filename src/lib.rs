@@ -37,12 +37,15 @@
 //!   [`DirectedAcyclicGraph`] implements [`quickcheck::Arbitrary`] (with
 //!   meaningful shrinking).
 //!
-//! ## Missing features
+//! ## Anti-features
 //!
 //! * No support for storing anything in the vertices.  This may be done on the
 //!   caller's side with a bidirectional mapping to integer vertices.
 //! * No support for assigning weights to either edges or vertices.  Again, this
 //!   may be done on the caller's side with a bidirectional mapping.
+//! * No support for enumerating *incoming* edges of a vertex, only *outgoing*
+//!   ones.  If this is required for some algorithm, it may be built on top of
+//!   [`DirectedAcyclicGraph`].
 //!
 //!   [^1]: You can always maintain a bidirectional mapping from your domain to
 //!    integers if you need some other type.
@@ -56,29 +59,29 @@
 //! See either [`DirectedAcyclicGraph::empty`] or
 //! [`DirectedAcyclicGraph::from_edges`] for the "entry point" to this crate.
 
-use std::{io::Write, collections::{HashSet, VecDeque}};
+use std::collections::VecDeque;
+use std::io::Write;
 
+use fixedbitset::FixedBitSet;
 #[cfg(feature = "qc")]
-use quickcheck::{Gen, Arbitrary};
+use quickcheck::{Arbitrary, Gen};
 
 mod strictly_upper_triangular_matrix;
-pub use strictly_upper_triangular_matrix::StrictlyUpperTriangularMatrix;
-pub use strictly_upper_triangular_matrix::NeighboursIterator;
 pub use strictly_upper_triangular_matrix::EdgesIterator;
-
+pub use strictly_upper_triangular_matrix::NeighboursIterator;
+pub use strictly_upper_triangular_matrix::StrictlyUpperTriangularMatrix;
 
 #[derive(Clone)]
 pub struct DirectedAcyclicGraph {
     adjacency_matrix: StrictlyUpperTriangularMatrix,
 }
 
-
 impl std::fmt::Debug for DirectedAcyclicGraph {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let ones: Vec<(usize, usize)> = self.iter_edges().collect();
         write!(
             f,
-            "DirectedAcyclicGraph::from_edges({}, vec!{:?})",
+            "DirectedAcyclicGraph::from_edges({}, &{:?})",
             self.vertex_count(),
             ones
         )?;
@@ -86,40 +89,72 @@ impl std::fmt::Debug for DirectedAcyclicGraph {
     }
 }
 
-
-pub struct OrderedPosetPairsIterator<'a> {
+pub struct ReverseTopologicalOrderVerticesIterator<'a> {
     adjacency_matrix: &'a StrictlyUpperTriangularMatrix,
-    vertices_with_no_incoming_edges: Vec<usize>,
-    to_visit: VecDeque<(usize, usize)>,
-    visited: HashSet<(usize, usize)>,
+    visited: FixedBitSet,
+    to_visit: Vec<usize>,
 }
 
-impl<'a> Iterator for OrderedPosetPairsIterator<'a> {
-    type Item = (usize, usize);
+impl<'a> Iterator for ReverseTopologicalOrderVerticesIterator<'a> {
+    type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
+        // This is basically a recursive topological sort algorithm with an
+        // explicit stack instead of recursion for stack safety and without the
+        // final reversal because we don't always need it in the caller.
         loop {
-            while let Some((u, v)) = self.to_visit.pop_front() {
-                if self.visited.contains(&(u, v)) {
-                    continue;
-                }
-                let neighbours: Vec<usize> = self.adjacency_matrix.iter_neighbours(v).collect();
-                self.to_visit.extend(neighbours.into_iter().map(|z| (v, z)));
-                self.visited.insert((u, v));
-                return Some((u, v));
+            let u = match self.to_visit.last().copied() {
+                Some(u) => u,
+                None => return None,
+            };
+            if self.visited[u] {
+                self.to_visit.pop();
+                continue;
             }
-
-            if let Some(u) = self.vertices_with_no_incoming_edges.pop() {
-                let neighbours: Vec<usize> = self.adjacency_matrix.iter_neighbours(u).collect();
-                self.to_visit.extend(neighbours.into_iter().map(|v| (u, v)));
+            let unvisited_neighbours: Vec<usize> = self
+                .adjacency_matrix
+                .iter_neighbours(u)
+                .filter(|v| !self.visited[*v])
+                .collect();
+            if unvisited_neighbours.is_empty() {
+                // We have visited all the descendants of u.  We can now emit u
+                // from the iterator.
+                self.to_visit.pop();
+                self.visited.set(u, true);
+                return Some(u);
             }
-            else {
-                return None;
-            }
+            self.to_visit.extend(unvisited_neighbours);
         }
     }
 }
 
+pub struct PosetPairsIterator<'a> {
+    adjacency_matrix: &'a StrictlyUpperTriangularMatrix,
+    inner: ReverseTopologicalOrderVerticesIterator<'a>,
+    seen_vertices: FixedBitSet,
+    buffer: VecDeque<(usize, usize)>,
+}
+
+impl<'a> Iterator for PosetPairsIterator<'a> {
+    type Item = (usize, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some((u, v)) = self.buffer.pop_front() {
+                return Some((u, v));
+            }
+
+            let u = self.inner.next()?;
+
+            for v in self.adjacency_matrix.iter_neighbours(u) {
+                if self.seen_vertices[v] {
+                    self.buffer.push_back((u, v));
+                }
+            }
+            self.seen_vertices.set(u, true);
+        }
+    }
+}
 
 impl DirectedAcyclicGraph {
     pub fn empty(vertex_count: usize) -> Self {
@@ -187,32 +222,98 @@ impl DirectedAcyclicGraph {
         Ok(())
     }
 
-    /// When the DAG represents a [Partially Ordered
-    /// Set](https://en.wikipedia.org/wiki/Partially_ordered_set), it's useful
-    /// to enumerate all the Poset pairs in a fashion that preserves the
-    /// underlying order.
-    pub fn iter_ordered_poset_pairs(&self) -> OrderedPosetPairsIterator {
-        let vertex_count = self.vertex_count();
+    /// Note that the order of the vertices is reverse topological one.
+    pub fn iter_reachable_vertices_starting_at(
+        &self,
+        u: usize,
+    ) -> ReverseTopologicalOrderVerticesIterator {
+        ReverseTopologicalOrderVerticesIterator {
+            adjacency_matrix: &self.adjacency_matrix,
+            visited: FixedBitSet::with_capacity(self.vertex_count()),
+            to_visit: vec![u],
+        }
+    }
 
-        let mut incoming_edges_count: Vec<usize> = vec![0; vertex_count];
-        self.iter_edges().for_each(|(_, right)| {
-            incoming_edges_count[right] += 1;
-        });
+    pub fn iter_reverse_topologically_ordered_vertices(
+        &self,
+    ) -> ReverseTopologicalOrderVerticesIterator {
+        let incoming_edges_count = {
+            let mut incoming_edges_count: Vec<usize> = vec![0; self.vertex_count()];
+            for (_, v) in self.iter_edges() {
+                incoming_edges_count[v] += 1;
+            }
+            incoming_edges_count
+        };
 
-        let vertices_with_no_incoming_edges: Vec<usize> = incoming_edges_count
+        let vertices_without_incoming_edges: Vec<usize> = incoming_edges_count
             .into_iter()
             .enumerate()
             .filter(|(_, indegree)| *indegree == 0)
             .map(|(vertex, _)| vertex)
             .collect();
-        let to_visit: VecDeque<(usize, usize)> = VecDeque::with_capacity(vertex_count);
-        let visited: HashSet<(usize, usize)> = HashSet::with_capacity(vertex_count);
 
-        OrderedPosetPairsIterator {
+        ReverseTopologicalOrderVerticesIterator {
             adjacency_matrix: &self.adjacency_matrix,
-            vertices_with_no_incoming_edges,
-            to_visit,
-            visited,
+            visited: FixedBitSet::with_capacity(self.vertex_count()),
+            to_visit: vertices_without_incoming_edges,
+        }
+    }
+
+    /// This simply does `collect()` plus `reverse()` on the result of
+    /// [`Self::iter_reverse_topologically_ordered_vertices()`].
+    pub fn get_topologically_ordered_vertices(&self) -> Vec<usize> {
+        let mut result: Vec<usize> = Vec::with_capacity(self.vertex_count());
+        result.extend(self.iter_reverse_topologically_ordered_vertices());
+        result.reverse();
+        result
+    }
+
+    /// Returns a new DAG that is a [transitive
+    /// reduction](https://en.wikipedia.org/wiki/Transitive_reduction) of
+    /// `self`.
+    pub fn transitive_reduction(&self) -> Self {
+        let mut result = self.clone();
+
+        for u in 0..self.vertex_count() {
+            for v in self.iter_neighbours(u) {
+                for w in self.iter_reachable_vertices_starting_at(v) {
+                    if w == v {
+                        continue;
+                    }
+                    result.set_edge(u, w, false);
+                }
+            }
+        }
+        result
+    }
+
+    /// Returns a new DAG that is a [transitive
+    /// closure](https://en.wikipedia.org/wiki/Transitive_closure) of `self`.
+    pub fn transitive_closure(&self) -> Self {
+        let mut result = self.clone();
+
+        for u in 0..self.vertex_count() {
+            for v in self.iter_neighbours(u) {
+                for w in self.iter_reachable_vertices_starting_at(v) {
+                    if w == v {
+                        continue;
+                    }
+                    result.set_edge(u, w, true);
+                }
+            }
+        }
+        result
+    }
+
+    /// When a DAG represents a [partially ordered
+    /// set](https://en.wikipedia.org/wiki/Partially_ordered_set), this method
+    /// iterates over all the pairs of that poset.
+    pub fn iter_poset_pairs(&self) -> PosetPairsIterator {
+        PosetPairsIterator {
+            adjacency_matrix: &self.adjacency_matrix,
+            inner: self.iter_reverse_topologically_ordered_vertices(),
+            seen_vertices: FixedBitSet::with_capacity(self.vertex_count()),
+            buffer: Default::default(),
         }
     }
 }
@@ -223,8 +324,10 @@ impl Arbitrary for DirectedAcyclicGraph {
         let vertex_count = g.size();
         let mut dag = DirectedAcyclicGraph::empty(vertex_count);
 
+        // XXX This could be just FixedBitSet::arbitrary(g) because every
+        // strictly upper triangular matrix represents some DAG.
         for u in 0..vertex_count {
-            for v in (u+1)..vertex_count {
+            for v in (u + 1)..vertex_count {
                 dag.set_edge(u, v, Arbitrary::arbitrary(g));
             }
         }
@@ -242,7 +345,7 @@ impl Arbitrary for DirectedAcyclicGraph {
         let left_vertex_count = vertex_count / 2;
         let mut left = DirectedAcyclicGraph::empty(left_vertex_count);
         for u in 0..left_vertex_count {
-            for v in (u+1)..left_vertex_count {
+            for v in (u + 1)..left_vertex_count {
                 left.set_edge(u, v, self.get_edge(u, v));
             }
         }
@@ -250,8 +353,12 @@ impl Arbitrary for DirectedAcyclicGraph {
         let right_vertex_count = vertex_count - left_vertex_count;
         let mut right = DirectedAcyclicGraph::empty(right_vertex_count);
         for u in left_vertex_count..vertex_count {
-            for v in (left_vertex_count+1)..vertex_count {
-                right.set_edge(u - left_vertex_count, v - left_vertex_count, self.get_edge(u, v));
+            for v in (left_vertex_count + 1)..vertex_count {
+                right.set_edge(
+                    u - left_vertex_count,
+                    v - left_vertex_count,
+                    self.get_edge(u, v),
+                );
             }
         }
 
@@ -259,13 +366,12 @@ impl Arbitrary for DirectedAcyclicGraph {
     }
 }
 
-
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeMap;
+    use std::collections::{BTreeMap, HashSet};
 
-    use quickcheck::{quickcheck, Arbitrary, Gen};
     use super::*;
+    use quickcheck::{quickcheck, Arbitrary, Gen};
 
     #[test]
     #[should_panic = "assertion failed: u < v"]
@@ -277,18 +383,51 @@ mod tests {
 
     #[test]
     fn divisibility_poset_of_12_ordered_pairs() {
-        let divisibility_poset_pairs: Vec<(usize, usize)> = vec![
-            (1, 2), (1, 3), (1, 4), (1, 5), (1, 6), (1, 7), (1, 8), (1, 9), (1, 10), (1, 11), (1, 12),
-            (2, 4), (2, 6), (2, 8), (2, 10), (2, 12),
-            (3, 6), (3, 9), (3, 12),
-            (4, 8), (4, 12),
+        let divisibility_poset_pairs = vec![
+            (1, 2),
+            (1, 3),
+            (1, 4),
+            (1, 5),
+            (1, 6),
+            (1, 7),
+            (1, 8),
+            (1, 9),
+            (1, 10),
+            (1, 11),
+            (1, 12),
+            (2, 4),
+            (2, 6),
+            (2, 8),
+            (2, 10),
+            (2, 12),
+            (3, 6),
+            (3, 9),
+            (3, 12),
+            (4, 8),
+            (4, 12),
             (5, 10),
-            (6, 12)
+            (6, 12),
         ];
-        let dag = DirectedAcyclicGraph::from_edges(12+1, &divisibility_poset_pairs);
-        let total_order: Vec<(usize, usize)> = dag.iter_ordered_poset_pairs().collect();
-        println!("{:?}", total_order);
-        assert_eq!(total_order, divisibility_poset_pairs);
+        let dag = DirectedAcyclicGraph::from_edges(12 + 1, &divisibility_poset_pairs);
+        let dag = dag.transitive_reduction();
+        let dag_pairs: HashSet<(usize, usize)> = HashSet::from_iter(dag.iter_poset_pairs());
+        let expected = HashSet::from_iter(vec![
+            (3, 9),
+            (2, 6),
+            (6, 12),
+            (1, 7),
+            (1, 11),
+            (5, 10),
+            (3, 6),
+            (2, 10),
+            (1, 2),
+            (4, 12),
+            (2, 4),
+            (4, 8),
+            (1, 5),
+            (1, 3),
+        ]);
+        assert_eq!(dag_pairs, expected);
     }
 
     // This mostly ensures `iter_edges()` really returns *all* the edges.
@@ -318,12 +457,13 @@ mod tests {
     impl IntegerDivisibilityPoset {
         fn get_divisors(number: usize) -> BTreeMap<usize, Vec<usize>> {
             let mut result: BTreeMap<usize, Vec<usize>> = Default::default();
-            let mut numbers: VecDeque<usize> = vec![number].into();
-            while let Some(n) = numbers.pop_front() {
-                let divisors_of_n: Vec<usize> = (1..n/2+1).filter(|d| n % d == 0).collect::<Vec<usize>>();
+            let mut numbers: Vec<usize> = vec![number];
+            while let Some(n) = numbers.pop() {
+                let divisors_of_n: Vec<usize> =
+                    (1..n / 2 + 1).filter(|d| n % d == 0).rev().collect();
                 for divisor in &divisors_of_n {
                     if !result.contains_key(&divisor) {
-                        numbers.push_back(*divisor);
+                        numbers.push(*divisor);
                     }
                 }
                 result.insert(n, divisors_of_n);
@@ -342,7 +482,11 @@ mod tests {
             let mut result = Vec::new();
 
             for divisor in self.divisors_of.keys() {
-                result.extend(self.divisors_of[&divisor].iter().map(|dividend| (*dividend, *divisor)));
+                result.extend(
+                    self.divisors_of[&divisor]
+                        .iter()
+                        .map(|dividend| (*dividend, *divisor)),
+                );
             }
 
             result
@@ -355,18 +499,28 @@ mod tests {
             IntegerDivisibilityPoset::of_number(*g.choose(&range).unwrap())
         }
 
-        fn shrink(&self) -> Box<dyn Iterator<Item=IntegerDivisibilityPoset>> {
+        fn shrink(&self) -> Box<dyn Iterator<Item = IntegerDivisibilityPoset>> {
             if self.number == 1 {
                 return Box::new(vec![].into_iter());
             }
             let new_number = self.number / 2;
-            let smaller_number: usize = *self.divisors_of.keys().filter(|&k| *k <= new_number).max().unwrap();
+            let smaller_number: usize = *self
+                .divisors_of
+                .keys()
+                .filter(|&k| *k <= new_number)
+                .max()
+                .unwrap();
             Box::new(vec![IntegerDivisibilityPoset::of_number(smaller_number)].into_iter())
         }
     }
 
-    fn prop_integer_divisibility_poset_isomorphism(integer_divisibility_poset: IntegerDivisibilityPoset) -> bool {
-        println!("{:10} {:?}", integer_divisibility_poset.number, integer_divisibility_poset.divisors_of);
+    fn prop_integer_divisibility_poset_isomorphism(
+        integer_divisibility_poset: IntegerDivisibilityPoset,
+    ) -> bool {
+        println!(
+            "{:10} {:?}",
+            integer_divisibility_poset.number, integer_divisibility_poset.divisors_of
+        );
 
         let pairs = integer_divisibility_poset.get_pairs();
 
@@ -386,6 +540,8 @@ mod tests {
     #[test]
     fn integer_divisibility_poset_isomorphism() {
         let gen = quickcheck::Gen::new(1000);
-        quickcheck::QuickCheck::new().gen(gen).quickcheck(prop_integer_divisibility_poset_isomorphism as fn(IntegerDivisibilityPoset) -> bool);
+        quickcheck::QuickCheck::new().gen(gen).quickcheck(
+            prop_integer_divisibility_poset_isomorphism as fn(IntegerDivisibilityPoset) -> bool,
+        );
     }
 }
