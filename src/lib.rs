@@ -26,9 +26,11 @@
 //!   representation like adjacency lists or a square matrix.  IOW: Every
 //!   strictly upper triangular matrix represents *some* valid DAG.  At the same
 //!   time, every DAG is represented by some strictly upper triangular matrix.
-//! * The representation is *compact*: edges are just bits in a bit set.
-//!   Iteration over the edges of some vertex is just iteration over bits in a
-//!   bit set, so it's CPU-cache-friendly. That's nod at [Data Oriented
+//! * The representation is *compact*: edges are just bits in a bit set.  The
+//!   implementation uses just (n*n-n)/2 bits + O(1) memory for other fields,
+//!   where n is the number of vertices. Iteration over the edges of some vertex
+//!   is just iteration over bits in a bit set, so it's CPU-cache-friendly.
+//!   That's nod at [Data Oriented
 //!   Design](https://en.wikipedia.org/wiki/Data-oriented_design).
 //! * Generating a random DAG is a linear operation, contrary to a fully general
 //!   graph representation.  That was actually the original motivation for
@@ -72,7 +74,7 @@ impl std::fmt::Debug for DirectedAcyclicGraph {
         write!(
             f,
             "DirectedAcyclicGraph::from_edges({}, &{:?})",
-            self.vertex_count(),
+            self.get_vertex_count(),
             ones
         )?;
         Ok(())
@@ -163,22 +165,22 @@ impl DirectedAcyclicGraph {
         }
     }
 
-    pub fn vertex_count(&self) -> usize {
+    pub fn get_vertex_count(&self) -> usize {
         self.adjacency_matrix.size()
     }
 
     /// Requires `u < v`.  Panics otherwise.
     pub fn get_edge(&self, u: usize, v: usize) -> bool {
-        assert!(u < self.vertex_count());
-        assert!(v < self.vertex_count());
+        assert!(u < self.get_vertex_count());
+        assert!(v < self.get_vertex_count());
         assert!(u < v);
         self.adjacency_matrix.get(u, v)
     }
 
     /// Requires `u < v`.  Panics otherwise.
     pub fn set_edge(&mut self, u: usize, v: usize, exists: bool) {
-        assert!(u < self.vertex_count());
-        assert!(v < self.vertex_count());
+        assert!(u < self.get_vertex_count());
+        assert!(v < self.get_vertex_count());
         assert!(u < v);
         self.adjacency_matrix.set(u, v, exists);
     }
@@ -195,9 +197,9 @@ impl DirectedAcyclicGraph {
 
     /// Outputs the DAG in the [Graphviz DOT](https://graphviz.org/) format.
     pub fn to_dot<W: Write>(&self, output: &mut W) -> std::result::Result<(), std::io::Error> {
-        writeln!(output, "digraph dag_{} {{", self.vertex_count())?;
+        writeln!(output, "digraph dag_{} {{", self.get_vertex_count())?;
 
-        let elements: Vec<usize> = (0..self.vertex_count()).collect();
+        let elements: Vec<usize> = (0..self.get_vertex_count()).collect();
         for elem in elements {
             writeln!(output, "\t_{}[label=\"{}\"];", elem, elem)?;
         }
@@ -219,7 +221,7 @@ impl DirectedAcyclicGraph {
     ) -> ReverseTopologicalOrderVerticesIterator {
         ReverseTopologicalOrderVerticesIterator {
             adjacency_matrix: &self.adjacency_matrix,
-            visited: FixedBitSet::with_capacity(self.vertex_count()),
+            visited: FixedBitSet::with_capacity(self.get_vertex_count()),
             to_visit: vec![u],
         }
     }
@@ -228,7 +230,7 @@ impl DirectedAcyclicGraph {
         &self,
     ) -> ReverseTopologicalOrderVerticesIterator {
         let incoming_edges_count = {
-            let mut incoming_edges_count: Vec<usize> = vec![0; self.vertex_count()];
+            let mut incoming_edges_count: Vec<usize> = vec![0; self.get_vertex_count()];
             for (_, v) in self.iter_edges() {
                 incoming_edges_count[v] += 1;
             }
@@ -244,55 +246,9 @@ impl DirectedAcyclicGraph {
 
         ReverseTopologicalOrderVerticesIterator {
             adjacency_matrix: &self.adjacency_matrix,
-            visited: FixedBitSet::with_capacity(self.vertex_count()),
+            visited: FixedBitSet::with_capacity(self.get_vertex_count()),
             to_visit: vertices_without_incoming_edges,
         }
-    }
-
-    /// This simply does `collect()` plus `reverse()` on the result of
-    /// [`Self::iter_reverse_topologically_ordered_vertices()`].
-    pub fn get_topologically_ordered_vertices(&self) -> Vec<usize> {
-        let mut result: Vec<usize> = Vec::with_capacity(self.vertex_count());
-        result.extend(self.iter_reverse_topologically_ordered_vertices());
-        result.reverse();
-        result
-    }
-
-    /// Returns a new DAG that is a [transitive
-    /// reduction](https://en.wikipedia.org/wiki/Transitive_reduction) of
-    /// `self`.
-    pub fn transitive_reduction(&self) -> Self {
-        let mut result = self.clone();
-
-        for u in 0..self.vertex_count() {
-            for v in self.iter_neighbours(u) {
-                for w in self.iter_reachable_vertices_starting_at(v) {
-                    if w == v {
-                        continue;
-                    }
-                    result.set_edge(u, w, false);
-                }
-            }
-        }
-        result
-    }
-
-    /// Returns a new DAG that is a [transitive
-    /// closure](https://en.wikipedia.org/wiki/Transitive_closure) of `self`.
-    pub fn transitive_closure(&self) -> Self {
-        let mut result = self.clone();
-
-        for u in 0..self.vertex_count() {
-            for v in self.iter_neighbours(u) {
-                for w in self.iter_reachable_vertices_starting_at(v) {
-                    if w == v {
-                        continue;
-                    }
-                    result.set_edge(u, w, true);
-                }
-            }
-        }
-        result
     }
 
     /// When a DAG represents a [partially ordered
@@ -302,10 +258,55 @@ impl DirectedAcyclicGraph {
         PosetPairsIterator {
             adjacency_matrix: &self.adjacency_matrix,
             inner: self.iter_reverse_topologically_ordered_vertices(),
-            seen_vertices: FixedBitSet::with_capacity(self.vertex_count()),
+            seen_vertices: FixedBitSet::with_capacity(self.get_vertex_count()),
             buffer: Default::default(),
         }
     }
+}
+
+/// Returns a new DAG that is a [transitive
+/// reduction](https://en.wikipedia.org/wiki/Transitive_reduction) of a DAG.
+pub fn transitive_reduction(dag: &DirectedAcyclicGraph) -> DirectedAcyclicGraph {
+    let mut result = dag.clone();
+
+    for u in 0..dag.get_vertex_count() {
+        for v in dag.iter_neighbours(u) {
+            for w in dag.iter_reachable_vertices_starting_at(v) {
+                if w == v {
+                    continue;
+                }
+                result.set_edge(u, w, false);
+            }
+        }
+    }
+    result
+}
+
+/// Returns a new DAG that is a [transitive
+/// closure](https://en.wikipedia.org/wiki/Transitive_closure) of a DAG.
+pub fn transitive_closure(dag: &DirectedAcyclicGraph) -> DirectedAcyclicGraph {
+    let mut result = dag.clone();
+
+    for u in 0..dag.get_vertex_count() {
+        for v in dag.iter_neighbours(u) {
+            for w in dag.iter_reachable_vertices_starting_at(v) {
+                if w == v {
+                    continue;
+                }
+                result.set_edge(u, w, true);
+            }
+        }
+    }
+    result
+}
+
+/// Simply calls `collect()` plus `reverse()` on the result of
+/// [`DirectedAcyclicGraph::iter_reverse_topologically_ordered_vertices()`].
+pub fn get_topologically_ordered_vertices(dag: &DirectedAcyclicGraph) -> Vec<usize> {
+    let mut result: Vec<usize> = Vec::with_capacity(dag.get_vertex_count());
+    result.extend(dag.iter_reverse_topologically_ordered_vertices());
+    result.reverse();
+    result
 }
 
 #[cfg(feature = "qc")]
@@ -326,7 +327,7 @@ impl Arbitrary for DirectedAcyclicGraph {
     }
 
     fn shrink(&self) -> Box<dyn Iterator<Item = DirectedAcyclicGraph>> {
-        let vertex_count = self.vertex_count();
+        let vertex_count = self.get_vertex_count();
 
         if vertex_count < 2 {
             return Box::new(vec![].into_iter());
@@ -399,7 +400,7 @@ mod tests {
             (6, 12),
         ];
         let dag = DirectedAcyclicGraph::from_edges(12 + 1, &divisibility_poset_pairs);
-        let dag = dag.transitive_reduction();
+        let dag = transitive_reduction(&dag);
         let dag_pairs: HashSet<(usize, usize)> = HashSet::from_iter(dag.iter_poset_pairs());
         let expected = HashSet::from_iter(vec![
             (3, 9),
