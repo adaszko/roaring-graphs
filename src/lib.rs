@@ -15,7 +15,7 @@
 //! 1. DAG vertices are integer numbers (`usize`) which is used to trivially
 //!    test whether adding an edge would form a cycle.  It is simply stipulated
 //!    that an edge can only go from a node `u` to a node `v` when `u < v`.
-//!    Otherwise we panic. [^1]
+//!    Otherwise we panic.
 //! 1. Vertices numbering starts at 0.
 //! 1. The number of vertices is determined at construction time and
 //!    growing/shrinking generally requires a new graph to be constructed.
@@ -29,7 +29,7 @@
 //! * The representation is *compact*: edges are just bits in a bit set.
 //!   Iteration over the edges of some vertex is just iteration over bits in a
 //!   bit set, so it's CPU-cache-friendly. That's nod at [Data Oriented
-//!   Design](https://en.wikipedia.org/wiki/Data-oriented_design). [^2]
+//!   Design](https://en.wikipedia.org/wiki/Data-oriented_design). [^1]
 //! * Generating a random DAG is a linear operation, contrary to a fully general
 //!   graph representation.  That was actually the original motivation for
 //!   writing this crate.  It can be used with
@@ -39,18 +39,12 @@
 //!
 //! ## Anti-features
 //!
-//! * No support for storing anything in the vertices.  This may be done on the
-//!   caller's side with a bidirectional mapping to integer vertices.
-//! * No support for assigning weights to either edges or vertices.  Again, this
-//!   may be done on the caller's side with a bidirectional mapping.
+//! * No support for storing anything in the vertices.
+//! * No support for assigning weights to either edges or vertices.
 //! * No support for enumerating *incoming* edges of a vertex, only *outgoing*
-//!   ones.  If this is required for some algorithm, it may be built on top of
-//!   [`DirectedAcyclicGraph`].
+//!   ones.
 //!
-//!   [^1]: You can always maintain a bidirectional mapping from your domain to
-//!    integers if you need some other type.
-//!
-//!   [^2]: Note that currently, the implementation uses `|v|^2` bits, instead
+//!   [^1]: Note that currently, the implementation uses `|v|^2` bits, instead
 //!   of the optimal `(|v|^2 - |v|) / 2` bits.  This will most likely be
 //!   optimized in the future.
 //!

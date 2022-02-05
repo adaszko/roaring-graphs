@@ -1,4 +1,4 @@
-use fixedbitset::{FixedBitSet, Ones};
+use fixedbitset::FixedBitSet;
 
 #[derive(Clone)]
 pub struct StrictlyUpperTriangularMatrix {
@@ -6,16 +6,29 @@ pub struct StrictlyUpperTriangularMatrix {
     matrix: FixedBitSet,
 }
 
+// Reference: https://www.intel.com/content/www/us/en/develop/documentation/onemkl-developer-reference-c/top/lapack-routines/matrix-storage-schemes-for-lapack-routines.html
+fn get_index_from_row_column(i: usize, j: usize, size: usize) -> usize {
+    assert!(i < size, "assertion failed: i < m; i={}, m={}", i, size);
+    assert!(j < size, "assertion failed: j < m; j={}, m={}", j, size);
+    assert!(i < j, "assertion failed: i < j; i={}, j={}", i, j);
+    size * i + j
+}
 
 pub struct EdgesIterator<'a> {
     size: usize,
-    inner: Ones<'a>,
+    bitset: &'a FixedBitSet,
+    i: usize,
+    j: usize,
 }
 
 impl<'a> EdgesIterator<'a> {
     pub fn new(size: usize, bitset: &'a FixedBitSet) -> Self {
-        let inner = bitset.ones();
-        Self { size, inner }
+        Self {
+            size,
+            bitset,
+            i: 0,
+            j: 1,
+        }
     }
 }
 
@@ -23,13 +36,20 @@ impl<'a> Iterator for EdgesIterator<'a> {
     type Item = (usize, usize);
 
     fn next(&mut self) -> Option<Self::Item> {
-        while let Some(index) = self.inner.next() {
-            return Some((index / self.size, index % self.size));
+        while self.i < self.size {
+            while self.j < self.size {
+                let index = get_index_from_row_column(self.i, self.j, self.size);
+                let current_j = self.j;
+                self.j += 1;
+                if self.bitset[index] {
+                    return Some((self.i, current_j));
+                }
+            }
+            self.i += 1;
         }
         None
     }
 }
-
 
 pub struct NeighboursIterator<'a> {
     adjacency_matrix: &'a StrictlyUpperTriangularMatrix,
@@ -37,13 +57,15 @@ pub struct NeighboursIterator<'a> {
     right_vertex: usize,
 }
 
-
 impl<'a> Iterator for NeighboursIterator<'a> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
         while self.right_vertex < self.adjacency_matrix.size() {
-            if self.adjacency_matrix.get(self.left_vertex, self.right_vertex) {
+            if self
+                .adjacency_matrix
+                .get(self.left_vertex, self.right_vertex)
+            {
                 let result = self.right_vertex;
                 self.right_vertex += 1;
                 return Some(result);
@@ -53,7 +75,6 @@ impl<'a> Iterator for NeighboursIterator<'a> {
         None
     }
 }
-
 
 impl StrictlyUpperTriangularMatrix {
     pub fn zeroed(size: usize) -> Self {
@@ -78,11 +99,7 @@ impl StrictlyUpperTriangularMatrix {
     }
 
     fn index_from_row_column(&self, i: usize, j: usize) -> usize {
-        let m = self.size();
-        assert!(i < m, "assertion failed: i < m; i={}, m={}", i, m);
-        assert!(j < m, "assertion failed: j < m; j={}, m={}", j, m);
-        assert!(i < j, "assertion failed: i < j; i={}, j={}", i, j);
-        m * i + j
+        get_index_from_row_column(i, j, self.size())
     }
 
     pub fn get(&self, i: usize, j: usize) -> bool {
@@ -110,7 +127,6 @@ impl StrictlyUpperTriangularMatrix {
         }
     }
 }
-
 
 #[cfg(test)]
 mod tests {
