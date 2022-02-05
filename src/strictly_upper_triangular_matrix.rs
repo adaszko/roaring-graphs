@@ -7,11 +7,13 @@ pub struct StrictlyUpperTriangularMatrix {
 }
 
 // Reference: https://www.intel.com/content/www/us/en/develop/documentation/onemkl-developer-reference-c/top/lapack-routines/matrix-storage-schemes-for-lapack-routines.html
+// Formulas adjusted for indexing from zero.
+#[inline]
 fn get_index_from_row_column(i: usize, j: usize, size: usize) -> usize {
     assert!(i < size, "assertion failed: i < m; i={}, m={}", i, size);
     assert!(j < size, "assertion failed: j < m; j={}, m={}", j, size);
     assert!(i < j, "assertion failed: i < j; i={}, j={}", i, j);
-    size * i + j
+    ((2 * size - i - 1) * i) / 2 + j - i - 1
 }
 
 pub struct EdgesIterator<'a> {
@@ -78,8 +80,7 @@ impl<'a> Iterator for NeighboursIterator<'a> {
 
 impl StrictlyUpperTriangularMatrix {
     pub fn zeroed(size: usize) -> Self {
-        // XXX: The optimal capacity is (size * size - size) / 2
-        let capacity = size * size;
+        let capacity = (size * size - size) / 2;
         Self {
             size,
             matrix: FixedBitSet::with_capacity(capacity),
@@ -142,5 +143,24 @@ mod tests {
         matrix.set(0, 1, true);
         let ones: Vec<(usize, usize)> = matrix.iter_ones().collect();
         assert_eq!(ones, vec![(0, 1)]);
+    }
+
+    #[test]
+    fn index_computation_is_sane() {
+        // 2x2
+        assert_eq!(get_index_from_row_column(0, 1, 2), 0);
+
+        // 3x3
+        assert_eq!(get_index_from_row_column(0, 1, 3), 0);
+        assert_eq!(get_index_from_row_column(0, 2, 3), 1);
+        assert_eq!(get_index_from_row_column(1, 2, 3), 2);
+
+        // 4x4
+        assert_eq!(get_index_from_row_column(0, 1, 4), 0);
+        assert_eq!(get_index_from_row_column(0, 2, 4), 1);
+        assert_eq!(get_index_from_row_column(0, 3, 4), 2);
+        assert_eq!(get_index_from_row_column(1, 2, 4), 3);
+        assert_eq!(get_index_from_row_column(1, 3, 4), 4);
+        assert_eq!(get_index_from_row_column(2, 3, 4), 5);
     }
 }

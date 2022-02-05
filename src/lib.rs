@@ -29,7 +29,7 @@
 //! * The representation is *compact*: edges are just bits in a bit set.
 //!   Iteration over the edges of some vertex is just iteration over bits in a
 //!   bit set, so it's CPU-cache-friendly. That's nod at [Data Oriented
-//!   Design](https://en.wikipedia.org/wiki/Data-oriented_design). [^1]
+//!   Design](https://en.wikipedia.org/wiki/Data-oriented_design).
 //! * Generating a random DAG is a linear operation, contrary to a fully general
 //!   graph representation.  That was actually the original motivation for
 //!   writing this crate.  It can be used with
@@ -43,10 +43,6 @@
 //! * No support for assigning weights to either edges or vertices.
 //! * No support for enumerating *incoming* edges of a vertex, only *outgoing*
 //!   ones.
-//!
-//!   [^1]: Note that currently, the implementation uses `|v|^2` bits, instead
-//!   of the optimal `(|v|^2 - |v|) / 2` bits.  This will most likely be
-//!   optimized in the future.
 //!
 //! # Entry points
 //!
