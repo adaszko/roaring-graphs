@@ -58,14 +58,14 @@ use fixedbitset::FixedBitSet;
 #[cfg(feature = "qc")]
 use quickcheck::{Arbitrary, Gen};
 
-mod strictly_upper_triangular_matrix;
-pub use strictly_upper_triangular_matrix::EdgesIterator;
-pub use strictly_upper_triangular_matrix::NeighboursIterator;
-pub use strictly_upper_triangular_matrix::StrictlyUpperTriangularMatrix;
+mod strictly_upper_triangular_logical_matrix;
+pub use strictly_upper_triangular_logical_matrix::EdgesIterator;
+pub use strictly_upper_triangular_logical_matrix::NeighboursIterator;
+pub use strictly_upper_triangular_logical_matrix::StrictlyUpperTriangularLogicalMatrix;
 
 #[derive(Clone)]
 pub struct DirectedAcyclicGraph {
-    adjacency_matrix: StrictlyUpperTriangularMatrix,
+    adjacency_matrix: StrictlyUpperTriangularLogicalMatrix,
 }
 
 impl std::fmt::Debug for DirectedAcyclicGraph {
@@ -82,7 +82,7 @@ impl std::fmt::Debug for DirectedAcyclicGraph {
 }
 
 pub struct ReverseTopologicalOrderVerticesIterator<'a> {
-    adjacency_matrix: &'a StrictlyUpperTriangularMatrix,
+    adjacency_matrix: &'a StrictlyUpperTriangularLogicalMatrix,
     visited: FixedBitSet,
     to_visit: Vec<usize>,
 }
@@ -121,7 +121,7 @@ impl<'a> Iterator for ReverseTopologicalOrderVerticesIterator<'a> {
 }
 
 pub struct PosetPairsIterator<'a> {
-    adjacency_matrix: &'a StrictlyUpperTriangularMatrix,
+    adjacency_matrix: &'a StrictlyUpperTriangularLogicalMatrix,
     inner: ReverseTopologicalOrderVerticesIterator<'a>,
     seen_vertices: FixedBitSet,
     buffer: VecDeque<(usize, usize)>,
@@ -151,7 +151,7 @@ impl<'a> Iterator for PosetPairsIterator<'a> {
 impl DirectedAcyclicGraph {
     pub fn empty(vertex_count: usize) -> Self {
         Self {
-            adjacency_matrix: StrictlyUpperTriangularMatrix::zeroed(vertex_count),
+            adjacency_matrix: StrictlyUpperTriangularLogicalMatrix::zeroed(vertex_count),
         }
     }
 
@@ -161,7 +161,7 @@ impl DirectedAcyclicGraph {
     /// `(u, v)` in `edges`.  Panics otherwise.
     pub fn from_edges(vertex_count: usize, edges: &[(usize, usize)]) -> Self {
         Self {
-            adjacency_matrix: StrictlyUpperTriangularMatrix::from_ones(vertex_count, edges),
+            adjacency_matrix: StrictlyUpperTriangularLogicalMatrix::from_ones(vertex_count, edges),
         }
     }
 

@@ -1,7 +1,7 @@
 use fixedbitset::FixedBitSet;
 
 #[derive(Clone)]
-pub struct StrictlyUpperTriangularMatrix {
+pub struct StrictlyUpperTriangularLogicalMatrix {
     size: usize,
     matrix: FixedBitSet,
 }
@@ -54,7 +54,7 @@ impl<'a> Iterator for EdgesIterator<'a> {
 }
 
 pub struct NeighboursIterator<'a> {
-    adjacency_matrix: &'a StrictlyUpperTriangularMatrix,
+    adjacency_matrix: &'a StrictlyUpperTriangularLogicalMatrix,
     left_vertex: usize,
     right_vertex: usize,
 }
@@ -78,7 +78,7 @@ impl<'a> Iterator for NeighboursIterator<'a> {
     }
 }
 
-impl StrictlyUpperTriangularMatrix {
+impl StrictlyUpperTriangularLogicalMatrix {
     pub fn zeroed(size: usize) -> Self {
         let capacity = (size * size - size) / 2;
         Self {
@@ -131,11 +131,11 @@ impl StrictlyUpperTriangularMatrix {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::strictly_upper_triangular_logical_matrix::*;
 
     #[test]
     fn positive_test_3x3_matrix() {
-        let mut matrix = StrictlyUpperTriangularMatrix::zeroed(3);
+        let mut matrix = StrictlyUpperTriangularLogicalMatrix::zeroed(3);
         assert_eq!(matrix.get(0, 1), false);
         let ones: Vec<(usize, usize)> = matrix.iter_ones().collect();
         assert_eq!(ones, vec![]);
