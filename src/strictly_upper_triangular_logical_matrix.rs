@@ -10,9 +10,9 @@ pub struct StrictlyUpperTriangularLogicalMatrix {
 // Formulas adjusted for indexing from zero.
 #[inline]
 fn get_index_from_row_column(i: usize, j: usize, size: usize) -> usize {
-    assert!(i < size, "assertion failed: i < m; i={}, m={}", i, size);
-    assert!(j < size, "assertion failed: j < m; j={}, m={}", j, size);
-    assert!(i < j, "assertion failed: i < j; i={}, j={}", i, j);
+    debug_assert!(i < size, "assertion failed: i < m; i={}, m={}", i, size);
+    debug_assert!(j < size, "assertion failed: j < m; j={}, m={}", j, size);
+    debug_assert!(i < j, "assertion failed: i < j; i={}, j={}", i, j);
     ((2 * size - i - 1) * i) / 2 + j - i - 1
 }
 
@@ -95,10 +95,12 @@ impl StrictlyUpperTriangularLogicalMatrix {
         result
     }
 
+    #[inline]
     pub fn size(&self) -> usize {
         self.size
     }
 
+    #[inline]
     fn index_from_row_column(&self, i: usize, j: usize) -> usize {
         get_index_from_row_column(i, j, self.size())
     }
@@ -120,7 +122,7 @@ impl StrictlyUpperTriangularLogicalMatrix {
     }
 
     pub fn iter_neighbours(&self, u: usize) -> NeighboursIterator {
-        assert!(u < self.size());
+        debug_assert!(u < self.size());
         NeighboursIterator {
             adjacency_matrix: self,
             left_vertex: u,
