@@ -196,25 +196,6 @@ impl DirectedAcyclicGraph {
         self.adjacency_matrix.iter_neighbours(v)
     }
 
-    /// Outputs the DAG in the [Graphviz DOT](https://graphviz.org/) format.
-    pub fn to_dot<W: Write>(&self, output: &mut W) -> std::result::Result<(), std::io::Error> {
-        writeln!(output, "digraph dag_{} {{", self.get_vertex_count())?;
-
-        let elements: Vec<usize> = (0..self.get_vertex_count()).collect();
-        for elem in elements {
-            writeln!(output, "\t_{}[label=\"{}\"];", elem, elem)?;
-        }
-
-        writeln!(output, "\n")?;
-
-        for (left, right) in self.iter_edges() {
-            writeln!(output, "\t_{} -> _{};", left, right)?;
-        }
-
-        writeln!(output, "}}")?;
-        Ok(())
-    }
-
     /// Note that the order of the vertices is reverse topological one.
     pub fn iter_reachable_vertices_starting_at(
         &self,
@@ -263,6 +244,27 @@ impl DirectedAcyclicGraph {
             buffer: Default::default(),
         }
     }
+}
+
+/// Outputs the DAG in the [Graphviz DOT](https://graphviz.org/) format.
+pub fn to_dot<W: Write>(
+    dag: &DirectedAcyclicGraph,
+    output: &mut W,
+) -> std::result::Result<(), std::io::Error> {
+    writeln!(output, "digraph dag_{} {{", dag.get_vertex_count())?;
+
+    for elem in 0..dag.get_vertex_count() {
+        writeln!(output, "\t_{}[label=\"{}\"];", elem, elem)?;
+    }
+
+    writeln!(output, "\n")?;
+
+    for (left, right) in dag.iter_edges() {
+        writeln!(output, "\t_{} -> _{};", left, right)?;
+    }
+
+    writeln!(output, "}}")?;
+    Ok(())
 }
 
 /// Returns a new DAG that is a [transitive
