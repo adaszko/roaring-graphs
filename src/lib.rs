@@ -21,20 +21,22 @@
 //!    growing/shrinking generally requires a new graph to be constructed.
 //!
 //! In exchange for these assumptions you get these useful properties:
-//! * It's not possible to represent a graph with the [`DirectedAcyclicGraph`]
-//!   data type that's not a DAG, contrary to a fully general graph
-//!   representation like adjacency lists or a square matrix.  IOW: Every
-//!   strictly upper triangular matrix represents *some* valid DAG.  At the same
-//!   time, every DAG is represented by some strictly upper triangular matrix.
-//! * The representation is *compact*: edges are just bits in a bit set.  The
-//!   implementation uses just (n*n-n)/2 bits + O(1) memory for other fields,
-//!   where n is the number of vertices. Iteration over the edges of some vertex
-//!   is just iteration over bits in a bit set, so it's CPU-cache-friendly.
-//!   That's nod at [Data Oriented
-//!   Design](https://en.wikipedia.org/wiki/Data-oriented_design).
-//! * Generating a random DAG is a linear operation, contrary to a fully general
-//!   graph representation.  That was actually the original motivation for
-//!   writing this crate.  It can be used with
+//! * **Correctness**: It's not possible to represent a graph with the
+//!   [`DirectedAcyclicGraph`] data type that's not a DAG, contrary to a fully
+//!   general graph representation like adjacency lists or a square matrix. IOW:
+//!   Every strictly upper triangular matrix represents *some* valid DAG. At the
+//!   same time, every DAG is represented by some strictly upper triangular
+//!   matrix.
+//! * **Efficiency**: The representation is *compact*: edges are just bits in a
+//!   bit set.  The implementation uses just `(n*n-n)/2` *bits* of memory + a
+//!   constant, where `n` is the number of vertices.
+//! * **Efficiency**: The chosen matrix representation is a [row-major packed
+//!   representation](https://www.intel.com/content/www/us/en/develop/documentation/onemkl-developer-reference-c/top/lapack-routines/matrix-storage-schemes-for-lapack-routines.html)
+//!   so that iteration over the edges of a vertex is just an iteration over
+//!   *consecutive* bits in a bit set, so it has good CPU cache locality.
+//! * **Efficiency**: Generating a random DAG is a linear operation, contrary to
+//!   a fully general graph representation.  That was actually the original
+//!   motivation for writing this crate.  It can be used with
 //!   [quickcheck](https://crates.io/crates/quickcheck) efficiently.  In fact,
 //!   [`DirectedAcyclicGraph`] implements [`quickcheck::Arbitrary`] (with
 //!   meaningful shrinking).
