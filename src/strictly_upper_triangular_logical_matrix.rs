@@ -4,15 +4,6 @@ const fn strictly_upper_triangular_matrix_capacity(n: usize) -> usize {
     (n * n - n) / 2
 }
 
-/// A zero-indexed [row-major
-/// packed](https://www.intel.com/content/www/us/en/develop/documentation/onemkl-developer-reference-c/top/lapack-routines/matrix-storage-schemes-for-lapack-routines.html)
-/// matrix of booleans.
-#[derive(Clone)]
-pub struct StrictlyUpperTriangularLogicalMatrix {
-    size: usize,
-    matrix: FixedBitSet,
-}
-
 pub struct RowColumnPairsIterator {
     size: usize,
     i: usize,
@@ -36,6 +27,22 @@ impl<'a> Iterator for RowColumnPairsIterator {
         }
         None
     }
+}
+
+/// Iterates over `(i, j)` pairs in an order that favors CPU cache locality.
+/// If your graph algorithm can process edges in an arbitrary order, it is
+/// recommended you use this iterator.
+pub fn iter_row_column_pairs(size: usize) -> RowColumnPairsIterator {
+    RowColumnPairsIterator { size, i: 0, j: 1 }
+}
+
+/// A zero-indexed [row-major
+/// packed](https://www.intel.com/content/www/us/en/develop/documentation/onemkl-developer-reference-c/top/lapack-routines/matrix-storage-schemes-for-lapack-routines.html)
+/// matrix of booleans.
+#[derive(Clone)]
+pub struct StrictlyUpperTriangularLogicalMatrix {
+    size: usize,
+    matrix: FixedBitSet,
 }
 
 // Reference: https://www.intel.com/content/www/us/en/develop/documentation/onemkl-developer-reference-c/top/lapack-routines/matrix-storage-schemes-for-lapack-routines.html
@@ -147,17 +154,6 @@ impl StrictlyUpperTriangularLogicalMatrix {
         let current = self.matrix[index];
         self.matrix.set(index, value);
         current
-    }
-
-    /// Iterates over `(i, j)` pairs in an order that favors CPU cache locality.
-    /// If your graph algorithm can process edges in an arbitrary order, it is
-    /// recommended you use this iterator.
-    pub fn iter_row_column_pairs(&self) -> RowColumnPairsIterator {
-        RowColumnPairsIterator {
-            size: self.size,
-            i: 0,
-            j: 1,
-        }
     }
 
     pub fn iter_ones(&self) -> EdgesIterator {
