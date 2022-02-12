@@ -4,36 +4,45 @@ const fn strictly_upper_triangular_matrix_capacity(n: usize) -> usize {
     (n * n - n) / 2
 }
 
-pub struct RowColumnPairsIterator {
+pub struct CacheFriendlyMatrixIterator {
     size: usize,
     i: usize,
     j: usize,
+    index: usize,
 }
 
-impl<'a> Iterator for RowColumnPairsIterator {
-    type Item = (usize, usize);
+impl<'a> Iterator for CacheFriendlyMatrixIterator {
+    type Item = (usize, usize, usize);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.j < self.size {
-            let result = (self.i, self.j);
+            let result = (self.i, self.j, self.index);
             self.j += 1;
+            self.index += 1;
             return Some(result);
         }
         if self.i < self.size {
-            let result = (self.i, self.j);
+            let result = (self.i, self.j, self.index);
             self.i += 1;
             self.j = self.i + 1;
+            self.index += 1;
             return Some(result);
         }
         None
     }
 }
 
+pub fn iter_matrix_starting_at(i: usize, size: usize) -> CacheFriendlyMatrixIterator {
+    let j = i + 1;
+    let index = get_index_from_row_column(i, j, size);
+    CacheFriendlyMatrixIterator { size, i, j, index }
+}
+
 /// Iterates over `(i, j)` pairs in an order that favors CPU cache locality.
 /// If your graph algorithm can process edges in an arbitrary order, it is
 /// recommended you use this iterator.
-pub fn iter_row_column_pairs(size: usize) -> RowColumnPairsIterator {
-    RowColumnPairsIterator { size, i: 0, j: 1 }
+pub fn iter_matrix(size: usize) -> CacheFriendlyMatrixIterator {
+    iter_matrix_starting_at(0, size)
 }
 
 /// A zero-indexed [row-major
@@ -53,68 +62,6 @@ fn get_index_from_row_column(i: usize, j: usize, size: usize) -> usize {
     debug_assert!(j < size, "assertion failed: j < m; j={}, m={}", j, size);
     debug_assert!(i < j, "assertion failed: i < j; i={}, j={}", i, j);
     ((2 * size - i - 1) * i) / 2 + j - i - 1
-}
-
-pub struct EdgesIterator<'a> {
-    size: usize,
-    bitset: &'a FixedBitSet,
-    i: usize,
-    j: usize,
-}
-
-impl<'a> EdgesIterator<'a> {
-    pub fn new(size: usize, bitset: &'a FixedBitSet) -> Self {
-        Self {
-            size,
-            bitset,
-            i: 0,
-            j: 1,
-        }
-    }
-}
-
-impl<'a> Iterator for EdgesIterator<'a> {
-    type Item = (usize, usize);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while self.i < self.size {
-            while self.j < self.size {
-                let index = get_index_from_row_column(self.i, self.j, self.size);
-                let current_j = self.j;
-                self.j += 1;
-                if self.bitset[index] {
-                    return Some((self.i, current_j));
-                }
-            }
-            self.i += 1;
-        }
-        None
-    }
-}
-
-pub struct NeighboursIterator<'a> {
-    adjacency_matrix: &'a StrictlyUpperTriangularLogicalMatrix,
-    left_vertex: usize,
-    right_vertex: usize,
-}
-
-impl<'a> Iterator for NeighboursIterator<'a> {
-    type Item = usize;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        while self.right_vertex < self.adjacency_matrix.size() {
-            if self
-                .adjacency_matrix
-                .get(self.left_vertex, self.right_vertex)
-            {
-                let result = self.right_vertex;
-                self.right_vertex += 1;
-                return Some(result);
-            }
-            self.right_vertex += 1;
-        }
-        None
-    }
 }
 
 impl StrictlyUpperTriangularLogicalMatrix {
@@ -149,6 +96,7 @@ impl StrictlyUpperTriangularLogicalMatrix {
         self.matrix[index]
     }
 
+    /// Returns the previous value.
     pub fn set(&mut self, i: usize, j: usize, value: bool) -> bool {
         let index = self.index_from_row_column(i, j);
         let current = self.matrix[index];
@@ -156,17 +104,21 @@ impl StrictlyUpperTriangularLogicalMatrix {
         current
     }
 
-    pub fn iter_ones(&self) -> EdgesIterator {
-        EdgesIterator::new(self.size, &self.matrix)
+    pub fn iter_ones(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
+        iter_matrix(self.size()).filter_map(move |(i, j, index)| {
+            if self.matrix[index] {
+                Some((i, j))
+            } else {
+                None
+            }
+        })
     }
 
-    pub fn iter_neighbours(&self, u: usize) -> NeighboursIterator {
-        debug_assert!(u < self.size());
-        NeighboursIterator {
-            adjacency_matrix: self,
-            left_vertex: u,
-            right_vertex: u + 1,
-        }
+    pub fn iter_ones_at_row(&self, i: usize) -> impl Iterator<Item = usize> + '_ {
+        assert!(i < self.size());
+        iter_matrix_starting_at(i, self.size())
+            .take_while(move |(ii, _, _)| *ii == i)
+            .map(move |(_, jj, _)| jj)
     }
 }
 

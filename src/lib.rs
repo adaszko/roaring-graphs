@@ -57,8 +57,6 @@ use std::io::Write;
 use quickcheck::{Arbitrary, Gen};
 
 mod strictly_upper_triangular_logical_matrix;
-pub use strictly_upper_triangular_logical_matrix::EdgesIterator;
-pub use strictly_upper_triangular_logical_matrix::NeighboursIterator;
 pub use strictly_upper_triangular_logical_matrix::StrictlyUpperTriangularLogicalMatrix;
 
 pub mod algorithm;
@@ -120,15 +118,15 @@ impl DirectedAcyclicGraph {
         self.adjacency_matrix.set(u, v, exists);
     }
 
-    /// The order of edges is expedient to the graph representation.
-    pub fn iter_edges(&self) -> EdgesIterator {
+    /// Iter edges in the order that favors CPU cache locality.
+    pub fn iter_edges(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
         self.adjacency_matrix.iter_ones()
     }
 
     /// Iterates over the vertices `v` such that there's an edge `(u, v)` in the
     /// DAG.
-    pub fn iter_neighbours(&self, v: usize) -> NeighboursIterator {
-        self.adjacency_matrix.iter_neighbours(v)
+    pub fn iter_neighbours(&self, v: usize) -> impl Iterator<Item = usize> + '_ {
+        self.adjacency_matrix.iter_ones_at_row(v)
     }
 }
 
