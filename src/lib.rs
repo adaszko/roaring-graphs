@@ -13,27 +13,23 @@
 //! There are several assumptions this crate imposes on *your* code:
 //!
 //! 1. DAG vertices are integer numbers (`usize`) which is used to trivially
-//!    test whether adding an edge would form a cycle.  It is simply stipulated
-//!    that an edge can only go from a node `u` to a node `v` when `u < v`.
-//!    Otherwise we panic with a [`debug_assert`].
+//!    test whether adding an edge would form a cycle: edges are only allowed to
+//!    go "forward", i.e. from `u` to `v` iff `u < v`.  Otherwise we panic.
 //! 1. Vertices numbering starts at 0.
 //! 1. The number of vertices is determined at construction time and
 //!    growing/shrinking generally requires a new graph to be constructed.
 //!
 //! In exchange for these assumptions you get these useful properties:
-//! * **Correctness**: It's not possible to represent a graph with the
-//!   [`DirectedAcyclicGraph`] data type that's not a DAG, contrary to a fully
-//!   general graph representation like adjacency lists or a square matrix. IOW:
-//!   Every strictly upper triangular matrix represents *some* valid DAG. At the
-//!   same time, every DAG is represented by some strictly upper triangular
-//!   matrix.
-//! * **Efficiency**: The representation is *compact*: edges are just bits in a
-//!   bit set.  The implementation uses just `(n*n-n)/2` *bits* of memory + a
-//!   constant, where `n` is the number of vertices.
-//! * **Efficiency**: The chosen matrix representation is a [row-major packed
+//! * **Correctness**: It's not possible to have cycles by construction!
+//! * **Low memory usage**: The representation is *compact*: edges are just bits
+//!   in a bit set.  The implementation uses just `(|V|*|V|-|V|)/2` *bits* of
+//!   memory + a constant.
+//! * **Good CPU cache locality**: Edges are stored in a [row-major packed
 //!   representation](https://www.intel.com/content/www/us/en/develop/documentation/onemkl-developer-reference-c/top/lapack-routines/matrix-storage-schemes-for-lapack-routines.html)
-//!   so that iteration over the edges of a vertex is just an iteration over
-//!   *consecutive* bits in a bit set, so it has good CPU cache locality.
+//!   so that iteration over the neighbours of a vertex is just an iteration
+//!   over *consecutive* bits in a bit set.
+//! * **Low cognitive overhead**: No need to deal with type-level shenenigans to
+//!   get basic tasks done.
 //! * **Efficiency**: Generating a random DAG is a linear operation, contrary to
 //!   a fully general graph representation.  That was actually the original
 //!   motivation for writing this crate.  It can be used with
@@ -47,6 +43,8 @@
 //! * No support for assigning weights to either edges or vertices.
 //! * No support for enumerating *incoming* edges of a vertex, only *outgoing*
 //!   ones.
+//! * No serde impls.  Simply serialize/deserialize the list of edges with a
+//!   library of your choosing.
 //!
 //! # Entry points
 //!
