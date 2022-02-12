@@ -40,9 +40,9 @@ impl<'a> Iterator for BfsVerticesIterator<'a> {
             if self.visited[u] {
                 continue;
             }
+            self.visited.insert(u);
             self.to_visit
                 .extend(self.dag.iter_neighbours(u).filter(|v| !self.visited[*v]));
-            self.visited.insert(u);
             return Some(u);
         }
         None
@@ -116,9 +116,6 @@ impl<'a> Iterator for DfsPostOrderVerticesIterator<'a> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // This is basically a recursive topological sort algorithm with an
-        // explicit stack instead of recursion for stack safety and without the
-        // final reversal because we don't always need it in the caller.
         loop {
             let u = match self.to_visit.last().copied() {
                 Some(u) => u,
@@ -219,4 +216,53 @@ pub fn get_topologically_ordered_vertices(dag: &DirectedAcyclicGraph) -> Vec<usi
     result.extend(iter_vertices_dfs_post_order(dag));
     result.reverse();
     result
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn divisibility_poset_of_12_dfs_descendants() {
+        let divisibility_poset_pairs = vec![
+            (1, 2),
+            (1, 3),
+            (1, 4),
+            (1, 5),
+            (1, 6),
+            (1, 7),
+            (1, 8),
+            (1, 9),
+            (1, 10),
+            (1, 11),
+            (1, 12),
+            (2, 4),
+            (2, 6),
+            (2, 8),
+            (2, 10),
+            (2, 12),
+            (3, 6),
+            (3, 9),
+            (3, 12),
+            (4, 8),
+            (4, 12),
+            (5, 10),
+            (6, 12),
+        ];
+        let dag =
+            DirectedAcyclicGraph::from_edges_iter(12 + 1, divisibility_poset_pairs.into_iter());
+
+        assert_eq!(
+            iter_descendants_dfs(&dag, 12).collect::<Vec<usize>>(),
+            vec![12]
+        );
+        assert_eq!(
+            iter_descendants_dfs(&dag, 11).collect::<Vec<usize>>(),
+            vec![11]
+        );
+        assert_eq!(
+            iter_descendants_dfs(&dag, 6).collect::<Vec<usize>>(),
+            vec![6, 12]
+        );
+    }
 }

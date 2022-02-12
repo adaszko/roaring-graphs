@@ -1,13 +1,16 @@
-use crate::{traversal::iter_descendants_bfs, DirectedAcyclicGraph};
+use crate::{
+    traversal::{iter_descendants_bfs, iter_descendants_dfs_post_order},
+    DirectedAcyclicGraph,
+};
 
 /// Returns a new DAG that is a [transitive
 /// reduction](https://en.wikipedia.org/wiki/Transitive_reduction) of a DAG.
 pub fn transitive_reduction(dag: &DirectedAcyclicGraph) -> DirectedAcyclicGraph {
     let mut result = dag.clone();
-
     for u in 0..dag.get_vertex_count() {
         for v in dag.iter_neighbours(u) {
-            for w in iter_descendants_bfs(dag, v) {
+            for w in iter_descendants_dfs_post_order(dag, v) {
+                println!("{} -> {} -> {}", u, v, w);
                 if w == v {
                     continue;
                 }

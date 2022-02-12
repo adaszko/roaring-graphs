@@ -12,17 +12,16 @@ pub struct CacheFriendlyMatrixIterator {
 }
 
 impl<'a> Iterator for CacheFriendlyMatrixIterator {
-    type Item = (usize, usize, usize);
+    type Item = (usize, usize, usize); // (i, j, bitset index)
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.j < self.size {
-            let result = (self.i, self.j, self.index);
+        let result = (self.i, self.j, self.index);
+        if self.j < self.size - 1 {
             self.j += 1;
             self.index += 1;
             return Some(result);
         }
-        if self.i < self.size {
-            let result = (self.i, self.j, self.index);
+        if self.i < self.size - 1 {
             self.i += 1;
             self.j = self.i + 1;
             self.index += 1;
@@ -34,7 +33,7 @@ impl<'a> Iterator for CacheFriendlyMatrixIterator {
 
 pub fn iter_matrix_starting_at(i: usize, size: usize) -> CacheFriendlyMatrixIterator {
     let j = i + 1;
-    let index = get_index_from_row_column(i, j, size);
+    let index = unchecked_get_index_from_row_column(i, j, size);
     CacheFriendlyMatrixIterator { size, i, j, index }
 }
 
@@ -57,10 +56,7 @@ pub struct StrictlyUpperTriangularLogicalMatrix {
 // Reference: https://www.intel.com/content/www/us/en/develop/documentation/onemkl-developer-reference-c/top/lapack-routines/matrix-storage-schemes-for-lapack-routines.html
 // Formulas adjusted for indexing from zero.
 #[inline]
-fn get_index_from_row_column(i: usize, j: usize, size: usize) -> usize {
-    assert!(i < size);
-    assert!(j < size);
-    assert!(i < j);
+fn unchecked_get_index_from_row_column(i: usize, j: usize, size: usize) -> usize {
     ((2 * size - i - 1) * i) / 2 + j - i - 1
 }
 
@@ -88,7 +84,10 @@ impl StrictlyUpperTriangularLogicalMatrix {
 
     #[inline]
     fn index_from_row_column(&self, i: usize, j: usize) -> usize {
-        get_index_from_row_column(i, j, self.size())
+        assert!(i < self.size);
+        assert!(j < self.size);
+        assert!(i < j);
+        unchecked_get_index_from_row_column(i, j, self.size)
     }
 
     pub fn get(&self, i: usize, j: usize) -> bool {
@@ -118,6 +117,7 @@ impl StrictlyUpperTriangularLogicalMatrix {
         assert!(i < self.size());
         iter_matrix_starting_at(i, self.size())
             .take_while(move |(ii, _, _)| *ii == i)
+            .filter(move |(_, _, index)| self.matrix[*index])
             .map(move |(_, jj, _)| jj)
     }
 }
@@ -141,19 +141,38 @@ mod tests {
     #[test]
     fn index_computation_is_sane() {
         // 2x2
-        assert_eq!(get_index_from_row_column(0, 1, 2), 0);
+        assert_eq!(unchecked_get_index_from_row_column(0, 1, 2), 0);
 
         // 3x3
-        assert_eq!(get_index_from_row_column(0, 1, 3), 0);
-        assert_eq!(get_index_from_row_column(0, 2, 3), 1);
-        assert_eq!(get_index_from_row_column(1, 2, 3), 2);
+        assert_eq!(unchecked_get_index_from_row_column(0, 1, 3), 0);
+        assert_eq!(unchecked_get_index_from_row_column(0, 2, 3), 1);
+        assert_eq!(unchecked_get_index_from_row_column(1, 2, 3), 2);
 
         // 4x4
-        assert_eq!(get_index_from_row_column(0, 1, 4), 0);
-        assert_eq!(get_index_from_row_column(0, 2, 4), 1);
-        assert_eq!(get_index_from_row_column(0, 3, 4), 2);
-        assert_eq!(get_index_from_row_column(1, 2, 4), 3);
-        assert_eq!(get_index_from_row_column(1, 3, 4), 4);
-        assert_eq!(get_index_from_row_column(2, 3, 4), 5);
+        assert_eq!(unchecked_get_index_from_row_column(0, 1, 4), 0);
+        assert_eq!(unchecked_get_index_from_row_column(0, 2, 4), 1);
+        assert_eq!(unchecked_get_index_from_row_column(0, 3, 4), 2);
+        assert_eq!(unchecked_get_index_from_row_column(1, 2, 4), 3);
+        assert_eq!(unchecked_get_index_from_row_column(1, 3, 4), 4);
+        assert_eq!(unchecked_get_index_from_row_column(2, 3, 4), 5);
+    }
+
+    #[test]
+    fn test_matrix_iterator() {
+        let row_column_index: Vec<(usize, usize, usize)> = iter_matrix(3).collect();
+        assert_eq!(row_column_index, vec![(0, 1, 0), (0, 2, 1), (1, 2, 2),]);
+
+        let row_column_index: Vec<(usize, usize, usize)> = iter_matrix(4).collect();
+        assert_eq!(
+            row_column_index,
+            vec![
+                (0, 1, 0),
+                (0, 2, 1),
+                (0, 3, 2),
+                (1, 2, 3),
+                (1, 3, 4),
+                (2, 3, 5),
+            ]
+        );
     }
 }

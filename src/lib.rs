@@ -49,7 +49,8 @@
 //! # Entry points
 //!
 //! See either [`DirectedAcyclicGraph::empty`] or
-//! [`DirectedAcyclicGraph::from_edges`] for the "entry point" to this crate.
+//! [`DirectedAcyclicGraph::from_edges_iter`] for the "entry point" to this
+//! crate.
 
 use std::io::Write;
 
@@ -57,6 +58,8 @@ use std::io::Write;
 use quickcheck::{Arbitrary, Gen};
 
 mod strictly_upper_triangular_logical_matrix;
+use rand::{prelude::StdRng, Rng, SeedableRng};
+use rand_distr::{Bernoulli, Distribution};
 pub use strictly_upper_triangular_logical_matrix::StrictlyUpperTriangularLogicalMatrix;
 
 pub mod algorithm;
@@ -72,7 +75,7 @@ impl std::fmt::Debug for DirectedAcyclicGraph {
         let ones: Vec<(usize, usize)> = self.iter_edges().collect();
         write!(
             f,
-            "DirectedAcyclicGraph::from_edges({}, &{:?})",
+            "DirectedAcyclicGraph::from_edges({}, vec!{:?}.iter().cloned())",
             self.get_vertex_count(),
             ones
         )?;
@@ -99,6 +102,20 @@ impl DirectedAcyclicGraph {
         Self { adjacency_matrix }
     }
 
+    pub fn random<R: Rng, D: Distribution<bool> + Copy>(
+        vertex_count: usize,
+        rng: &mut R,
+        edges_distribution: D,
+    ) -> Self {
+        let mut dag = DirectedAcyclicGraph::empty(vertex_count);
+        for u in 0..vertex_count {
+            for v in (u + 1)..vertex_count {
+                dag.set_edge(u, v, rng.sample(edges_distribution));
+            }
+        }
+        dag
+    }
+
     #[inline]
     pub fn get_vertex_count(&self) -> usize {
         self.adjacency_matrix.size()
@@ -120,7 +137,7 @@ impl DirectedAcyclicGraph {
         self.adjacency_matrix.set(u, v, exists);
     }
 
-    /// Iter edges in the order that favors CPU cache locality.
+    /// Iterates over the edges in the order that favors CPU cache locality.
     pub fn iter_edges(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
         self.adjacency_matrix.iter_ones()
     }
@@ -157,16 +174,10 @@ pub fn to_dot<W: Write>(
 impl Arbitrary for DirectedAcyclicGraph {
     fn arbitrary(g: &mut Gen) -> Self {
         let vertex_count = g.size();
-        let mut dag = DirectedAcyclicGraph::empty(vertex_count);
-
-        // XXX This could be just FixedBitSet::arbitrary(g) because every
-        // strictly upper triangular matrix represents some DAG.
-        for u in 0..vertex_count {
-            for v in (u + 1)..vertex_count {
-                dag.set_edge(u, v, Arbitrary::arbitrary(g));
-            }
-        }
-
+        let seed = u64::arbitrary(g);
+        let mut rng = StdRng::seed_from_u64(seed);
+        let dag =
+            DirectedAcyclicGraph::random(vertex_count, &mut rng, Bernoulli::new(0.75).unwrap());
         dag
     }
 
@@ -247,6 +258,7 @@ mod tests {
         let dag =
             DirectedAcyclicGraph::from_edges_iter(12 + 1, divisibility_poset_pairs.into_iter());
         let dag = algorithm::transitive_reduction(&dag);
+
         let dag_pairs: HashSet<(usize, usize)> =
             HashSet::from_iter(traversal::iter_edges_dfs_post_order(&dag));
         let expected = HashSet::from_iter(vec![
@@ -384,5 +396,40 @@ mod tests {
         quickcheck::QuickCheck::new().gen(gen).quickcheck(
             prop_integer_divisibility_poset_isomorphism as fn(IntegerDivisibilityPoset) -> bool,
         );
+    }
+
+    #[test]
+    fn divisibility_poset_12_neighbours() {
+        let divisibility_poset_pairs = vec![
+            (1, 2),
+            (1, 3),
+            (1, 4),
+            (1, 5),
+            (1, 6),
+            (1, 7),
+            (1, 8),
+            (1, 9),
+            (1, 10),
+            (1, 11),
+            (1, 12),
+            (2, 4),
+            (2, 6),
+            (2, 8),
+            (2, 10),
+            (2, 12),
+            (3, 6),
+            (3, 9),
+            (3, 12),
+            (4, 8),
+            (4, 12),
+            (5, 10),
+            (6, 12),
+        ];
+        let dag =
+            DirectedAcyclicGraph::from_edges_iter(12 + 1, divisibility_poset_pairs.into_iter());
+        assert_eq!(dag.iter_neighbours(12).collect::<Vec<usize>>(), vec![]);
+        assert_eq!(dag.iter_neighbours(11).collect::<Vec<usize>>(), vec![]);
+        assert_eq!(dag.iter_neighbours(9).collect::<Vec<usize>>(), vec![]);
+        assert_eq!(dag.iter_neighbours(8).collect::<Vec<usize>>(), vec![]);
     }
 }

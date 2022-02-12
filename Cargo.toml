@@ -12,11 +12,13 @@ license = "GPL-3.0"
 
 [dependencies]
 fixedbitset = "0.4"
+rand = "0.8.4"
+rand_distr = "0.4.3"
 quickcheck = { version = "1", optional = true }
 
 [dev-dependencies]
 quickcheck = "1"
 
 [features]
-default = ["qc"]
+default = []
 qc = ["quickcheck"]
