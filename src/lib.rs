@@ -81,13 +81,13 @@ impl std::fmt::Debug for DirectedAcyclicGraph {
     }
 }
 
-pub struct ReverseTopologicalOrderVerticesIterator<'a> {
+pub struct DfsPostOrderVerticesIterator<'a> {
     adjacency_matrix: &'a StrictlyUpperTriangularLogicalMatrix,
     visited: FixedBitSet,
     to_visit: Vec<usize>,
 }
 
-impl<'a> Iterator for ReverseTopologicalOrderVerticesIterator<'a> {
+impl<'a> Iterator for DfsPostOrderVerticesIterator<'a> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -120,14 +120,14 @@ impl<'a> Iterator for ReverseTopologicalOrderVerticesIterator<'a> {
     }
 }
 
-pub struct PosetPairsIterator<'a> {
+pub struct DfsPostOrderEdgesIterator<'a> {
     adjacency_matrix: &'a StrictlyUpperTriangularLogicalMatrix,
-    inner: ReverseTopologicalOrderVerticesIterator<'a>,
+    inner: DfsPostOrderVerticesIterator<'a>,
     seen_vertices: FixedBitSet,
     buffer: VecDeque<(usize, usize)>,
 }
 
-impl<'a> Iterator for PosetPairsIterator<'a> {
+impl<'a> Iterator for DfsPostOrderEdgesIterator<'a> {
     type Item = (usize, usize);
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -196,21 +196,15 @@ impl DirectedAcyclicGraph {
         self.adjacency_matrix.iter_neighbours(v)
     }
 
-    /// Note that the order of the vertices is reverse topological one.
-    pub fn iter_reachable_vertices_starting_at(
-        &self,
-        u: usize,
-    ) -> ReverseTopologicalOrderVerticesIterator {
-        ReverseTopologicalOrderVerticesIterator {
+    pub fn iter_reachable_vertices_starting_at(&self, u: usize) -> DfsPostOrderVerticesIterator {
+        DfsPostOrderVerticesIterator {
             adjacency_matrix: &self.adjacency_matrix,
             visited: FixedBitSet::with_capacity(self.get_vertex_count()),
             to_visit: vec![u],
         }
     }
 
-    pub fn iter_reverse_topologically_ordered_vertices(
-        &self,
-    ) -> ReverseTopologicalOrderVerticesIterator {
+    pub fn get_vertices_without_incoming_edges(&self) -> Vec<usize> {
         let incoming_edges_count = {
             let mut incoming_edges_count: Vec<usize> = vec![0; self.get_vertex_count()];
             for (_, v) in self.iter_edges() {
@@ -226,20 +220,24 @@ impl DirectedAcyclicGraph {
             .map(|(vertex, _)| vertex)
             .collect();
 
-        ReverseTopologicalOrderVerticesIterator {
+        vertices_without_incoming_edges
+    }
+
+    pub fn iter_vertices_dfs_post_order(&self) -> DfsPostOrderVerticesIterator {
+        DfsPostOrderVerticesIterator {
             adjacency_matrix: &self.adjacency_matrix,
             visited: FixedBitSet::with_capacity(self.get_vertex_count()),
-            to_visit: vertices_without_incoming_edges,
+            to_visit: self.get_vertices_without_incoming_edges(),
         }
     }
 
     /// When a DAG represents a [partially ordered
     /// set](https://en.wikipedia.org/wiki/Partially_ordered_set), this method
     /// iterates over all the pairs of that poset.
-    pub fn iter_poset_pairs(&self) -> PosetPairsIterator {
-        PosetPairsIterator {
+    pub fn iter_edges_dfs_post_order(&self) -> DfsPostOrderEdgesIterator {
+        DfsPostOrderEdgesIterator {
             adjacency_matrix: &self.adjacency_matrix,
-            inner: self.iter_reverse_topologically_ordered_vertices(),
+            inner: self.iter_vertices_dfs_post_order(),
             seen_vertices: FixedBitSet::with_capacity(self.get_vertex_count()),
             buffer: Default::default(),
         }
@@ -304,10 +302,10 @@ pub fn transitive_closure(dag: &DirectedAcyclicGraph) -> DirectedAcyclicGraph {
 }
 
 /// Simply calls `collect()` plus `reverse()` on the result of
-/// [`DirectedAcyclicGraph::iter_reverse_topologically_ordered_vertices()`].
+/// [`DirectedAcyclicGraph::iter_vertices_dfs_post_order()`].
 pub fn get_topologically_ordered_vertices(dag: &DirectedAcyclicGraph) -> Vec<usize> {
     let mut result: Vec<usize> = Vec::with_capacity(dag.get_vertex_count());
-    result.extend(dag.iter_reverse_topologically_ordered_vertices());
+    result.extend(dag.iter_vertices_dfs_post_order());
     result.reverse();
     result
 }
@@ -404,7 +402,8 @@ mod tests {
         ];
         let dag = DirectedAcyclicGraph::from_edges(12 + 1, &divisibility_poset_pairs);
         let dag = transitive_reduction(&dag);
-        let dag_pairs: HashSet<(usize, usize)> = HashSet::from_iter(dag.iter_poset_pairs());
+        let dag_pairs: HashSet<(usize, usize)> =
+            HashSet::from_iter(dag.iter_edges_dfs_post_order());
         let expected = HashSet::from_iter(vec![
             (3, 9),
             (2, 6),
