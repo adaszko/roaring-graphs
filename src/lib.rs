@@ -90,7 +90,7 @@ impl DirectedAcyclicGraph {
     /// Constructs a DAG from a list of edges.
     ///
     /// Requires `u < vertex_count && v < vertex_count && u < v` for every edge
-    /// `(u, v)` in `edges`.  Panics with [`debug_assert`] otherwise.
+    /// `(u, v)` in `edges`.  Panics otherwise.
     pub fn from_edges(vertex_count: usize, edges: &[(usize, usize)]) -> Self {
         Self {
             adjacency_matrix: StrictlyUpperTriangularLogicalMatrix::from_ones(vertex_count, edges),
@@ -102,19 +102,19 @@ impl DirectedAcyclicGraph {
         self.adjacency_matrix.size()
     }
 
-    /// Requires `u < v`.  Panics with [`debug_assert`] otherwise.
+    /// Requires `u < v`.  Panics otherwise.
     pub fn get_edge(&self, u: usize, v: usize) -> bool {
-        debug_assert!(u < self.get_vertex_count());
-        debug_assert!(v < self.get_vertex_count());
-        debug_assert!(u < v);
+        assert!(u < self.get_vertex_count());
+        assert!(v < self.get_vertex_count());
+        assert!(u < v);
         self.adjacency_matrix.get(u, v)
     }
 
-    /// Requires `u < v`.  Panics with [`debug_assert`] otherwise.
+    /// Requires `u < v`.  Panics otherwise.
     pub fn set_edge(&mut self, u: usize, v: usize, exists: bool) {
-        debug_assert!(u < self.get_vertex_count());
-        debug_assert!(v < self.get_vertex_count());
-        debug_assert!(u < v);
+        assert!(u < self.get_vertex_count());
+        assert!(v < self.get_vertex_count());
+        assert!(u < v);
         self.adjacency_matrix.set(u, v, exists);
     }
 

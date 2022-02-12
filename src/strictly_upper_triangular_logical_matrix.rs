@@ -58,9 +58,9 @@ pub struct StrictlyUpperTriangularLogicalMatrix {
 // Formulas adjusted for indexing from zero.
 #[inline]
 fn get_index_from_row_column(i: usize, j: usize, size: usize) -> usize {
-    debug_assert!(i < size, "assertion failed: i < m; i={}, m={}", i, size);
-    debug_assert!(j < size, "assertion failed: j < m; j={}, m={}", j, size);
-    debug_assert!(i < j, "assertion failed: i < j; i={}, j={}", i, j);
+    assert!(i < size);
+    assert!(j < size);
+    assert!(i < j);
     ((2 * size - i - 1) * i) / 2 + j - i - 1
 }
 
