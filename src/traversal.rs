@@ -42,7 +42,7 @@ impl<'a> Iterator for BfsVerticesIterator<'a> {
             }
             self.visited.insert(u);
             self.to_visit
-                .extend(self.dag.iter_neighbours(u).filter(|v| !self.visited[*v]));
+                .extend(self.dag.iter_children(u).filter(|v| !self.visited[*v]));
             return Some(u);
         }
         None
@@ -80,7 +80,7 @@ impl<'a> Iterator for DfsVerticesIterator<'a> {
             if self.visited[u] {
                 continue;
             }
-            self.to_visit.extend(self.dag.iter_neighbours(u));
+            self.to_visit.extend(self.dag.iter_children(u));
             self.visited.insert(u);
             return Some(u);
         }
@@ -127,7 +127,7 @@ impl<'a> Iterator for DfsPostOrderVerticesIterator<'a> {
             }
             let unvisited_neighbours: Vec<usize> = self
                 .dag
-                .iter_neighbours(u)
+                .iter_children(u)
                 .filter(|v| !self.visited[*v])
                 .collect();
             if unvisited_neighbours.is_empty() {
@@ -180,7 +180,7 @@ impl<'a> Iterator for DfsPostOrderEdgesIterator<'a> {
 
             let u = self.inner.next()?;
 
-            for v in self.dag.iter_neighbours(u) {
+            for v in self.dag.iter_children(u) {
                 if self.seen_vertices[v] {
                     self.buffer.push_back((u, v));
                 }
@@ -220,6 +220,8 @@ pub fn get_topologically_ordered_vertices(dag: &DirectedAcyclicGraph) -> Vec<usi
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use super::*;
 
     #[test]
@@ -264,5 +266,20 @@ mod tests {
             iter_descendants_dfs(&dag, 6).collect::<Vec<usize>>(),
             vec![6, 12]
         );
+    }
+
+    fn prop_traversals_equal_modulo_order(dag: DirectedAcyclicGraph) {
+        let bfs: HashSet<usize> = iter_vertices_bfs(&dag).collect();
+        let dfs: HashSet<usize> = iter_vertices_dfs(&dag).collect();
+        let dfs_post_order: HashSet<usize> = iter_vertices_dfs_post_order(&dag).collect();
+        assert_eq!(bfs, dfs);
+        assert_eq!(dfs_post_order, dfs);
+        assert_eq!(dfs_post_order, bfs);
+    }
+
+    #[test]
+    fn traversals_equal_modulo_order() {
+        quickcheck::QuickCheck::new()
+            .quickcheck(prop_traversals_equal_modulo_order as fn(DirectedAcyclicGraph));
     }
 }

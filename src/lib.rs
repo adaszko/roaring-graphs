@@ -54,7 +54,6 @@
 
 use std::io::Write;
 
-#[cfg(feature = "qc")]
 use quickcheck::{Arbitrary, Gen};
 
 mod strictly_upper_triangular_logical_matrix;
@@ -137,16 +136,59 @@ impl DirectedAcyclicGraph {
         self.adjacency_matrix.set(u, v, exists);
     }
 
-    /// Iterates over the edges in the order that favors CPU cache locality.
+    /// Iterates over the edges in an order that favors CPU cache locality.
     pub fn iter_edges(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
         self.adjacency_matrix.iter_ones()
     }
 
-    /// Iterates over the vertices `v` such that there's an edge `(u, v)` in the
+    /// Iterates over vertices `v` such that there's an edge `(u, v)` in the
     /// DAG.
-    pub fn iter_neighbours(&self, v: usize) -> impl Iterator<Item = usize> + '_ {
-        self.adjacency_matrix.iter_ones_at_row(v)
+    pub fn iter_children(&self, u: usize) -> impl Iterator<Item = usize> + '_ {
+        self.adjacency_matrix.iter_ones_at_row(u)
     }
+}
+
+/// Break a DAG into two halves at the vertex `vertex`.  Used as a shrinking
+/// strategy for DAGs in the [`quickcheck::Arbitrary`] impl.
+///
+/// Note that if there are any edges between the left and the right DAGs, they
+/// get broken.
+///
+/// The right DAG is equal in the number of vertices to the left one if `|V|` is
+/// an even number or one bigger if `|V|` is odd.
+///
+/// We don't try to be clever here and compute something expensive like
+/// connected components as the property that fails might as well be "a graph
+/// has more than one connected component", in which case that clever shrinking
+/// algorithm would be useless.
+pub fn break_at(
+    dag: &DirectedAcyclicGraph,
+    vertex: usize,
+) -> (DirectedAcyclicGraph, DirectedAcyclicGraph) {
+    let vertex_count = dag.get_vertex_count();
+    assert!(vertex < vertex_count);
+
+    let left_vertex_count = vertex;
+    let mut left = DirectedAcyclicGraph::empty(left_vertex_count);
+    for u in 0..left_vertex_count {
+        for v in (u + 1)..left_vertex_count {
+            left.set_edge(u, v, dag.get_edge(u, v));
+        }
+    }
+
+    let right_vertex_count = vertex_count - left_vertex_count;
+    let mut right = DirectedAcyclicGraph::empty(right_vertex_count);
+    for u in left_vertex_count..vertex_count {
+        for v in (left_vertex_count + 1)..vertex_count {
+            right.set_edge(
+                u - left_vertex_count,
+                v - left_vertex_count,
+                dag.get_edge(u, v),
+            );
+        }
+    }
+
+    (left, right)
 }
 
 /// Outputs the DAG in the [Graphviz DOT](https://graphviz.org/) format.
@@ -170,7 +212,6 @@ pub fn to_dot<W: Write>(
     Ok(())
 }
 
-#[cfg(feature = "qc")]
 impl Arbitrary for DirectedAcyclicGraph {
     fn arbitrary(g: &mut Gen) -> Self {
         let vertex_count = g.size();
@@ -183,31 +224,10 @@ impl Arbitrary for DirectedAcyclicGraph {
 
     fn shrink(&self) -> Box<dyn Iterator<Item = DirectedAcyclicGraph>> {
         let vertex_count = self.get_vertex_count();
-
         if vertex_count < 2 {
             return Box::new(vec![].into_iter());
         }
-
-        let left_vertex_count = vertex_count / 2;
-        let mut left = DirectedAcyclicGraph::empty(left_vertex_count);
-        for u in 0..left_vertex_count {
-            for v in (u + 1)..left_vertex_count {
-                left.set_edge(u, v, self.get_edge(u, v));
-            }
-        }
-
-        let right_vertex_count = vertex_count - left_vertex_count;
-        let mut right = DirectedAcyclicGraph::empty(right_vertex_count);
-        for u in left_vertex_count..vertex_count {
-            for v in (left_vertex_count + 1)..vertex_count {
-                right.set_edge(
-                    u - left_vertex_count,
-                    v - left_vertex_count,
-                    self.get_edge(u, v),
-                );
-            }
-        }
-
+        let (left, right) = break_at(self, vertex_count / 2);
         Box::new(vec![left, right].into_iter())
     }
 }
@@ -427,9 +447,9 @@ mod tests {
         ];
         let dag =
             DirectedAcyclicGraph::from_edges_iter(12 + 1, divisibility_poset_pairs.into_iter());
-        assert_eq!(dag.iter_neighbours(12).collect::<Vec<usize>>(), vec![]);
-        assert_eq!(dag.iter_neighbours(11).collect::<Vec<usize>>(), vec![]);
-        assert_eq!(dag.iter_neighbours(9).collect::<Vec<usize>>(), vec![]);
-        assert_eq!(dag.iter_neighbours(8).collect::<Vec<usize>>(), vec![]);
+        assert_eq!(dag.iter_children(12).collect::<Vec<usize>>(), vec![]);
+        assert_eq!(dag.iter_children(11).collect::<Vec<usize>>(), vec![]);
+        assert_eq!(dag.iter_children(9).collect::<Vec<usize>>(), vec![]);
+        assert_eq!(dag.iter_children(8).collect::<Vec<usize>>(), vec![]);
     }
 }
