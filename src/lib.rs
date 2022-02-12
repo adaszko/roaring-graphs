@@ -61,8 +61,8 @@ pub use strictly_upper_triangular_logical_matrix::EdgesIterator;
 pub use strictly_upper_triangular_logical_matrix::NeighboursIterator;
 pub use strictly_upper_triangular_logical_matrix::StrictlyUpperTriangularLogicalMatrix;
 
+pub mod algorithm;
 pub mod traversal;
-use traversal::iter_reachable_vertices_starting_at;
 
 #[derive(Clone)]
 pub struct DirectedAcyclicGraph {
@@ -151,42 +151,6 @@ pub fn to_dot<W: Write>(
 
     writeln!(output, "}}")?;
     Ok(())
-}
-
-/// Returns a new DAG that is a [transitive
-/// reduction](https://en.wikipedia.org/wiki/Transitive_reduction) of a DAG.
-pub fn transitive_reduction(dag: &DirectedAcyclicGraph) -> DirectedAcyclicGraph {
-    let mut result = dag.clone();
-
-    for u in 0..dag.get_vertex_count() {
-        for v in dag.iter_neighbours(u) {
-            for w in iter_reachable_vertices_starting_at(dag, v) {
-                if w == v {
-                    continue;
-                }
-                result.set_edge(u, w, false);
-            }
-        }
-    }
-    result
-}
-
-/// Returns a new DAG that is a [transitive
-/// closure](https://en.wikipedia.org/wiki/Transitive_closure) of a DAG.
-pub fn transitive_closure(dag: &DirectedAcyclicGraph) -> DirectedAcyclicGraph {
-    let mut result = dag.clone();
-
-    for u in 0..dag.get_vertex_count() {
-        for v in dag.iter_neighbours(u) {
-            for w in iter_reachable_vertices_starting_at(dag, v) {
-                if w == v {
-                    continue;
-                }
-                result.set_edge(u, w, true);
-            }
-        }
-    }
-    result
 }
 
 #[cfg(feature = "qc")]
@@ -281,7 +245,7 @@ mod tests {
             (6, 12),
         ];
         let dag = DirectedAcyclicGraph::from_edges(12 + 1, &divisibility_poset_pairs);
-        let dag = transitive_reduction(&dag);
+        let dag = algorithm::transitive_reduction(&dag);
         let dag_pairs: HashSet<(usize, usize)> =
             HashSet::from_iter(traversal::iter_edges_dfs_post_order(&dag));
         let expected = HashSet::from_iter(vec![

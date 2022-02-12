@@ -149,7 +149,7 @@ impl StrictlyUpperTriangularLogicalMatrix {
         current
     }
 
-    /// Iterates over (i, j) pairs in an order that favors CPU cache locality.
+    /// Iterates over `(i, j)` pairs in an order that favors CPU cache locality.
     /// If your graph algorithm can process edges in an arbitrary order, it is
     /// recommended you use this iterator.
     pub fn iter_row_column_pairs(&self) -> RowColumnPairsIterator {
