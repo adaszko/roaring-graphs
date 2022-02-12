@@ -73,12 +73,12 @@ impl StrictlyUpperTriangularLogicalMatrix {
         }
     }
 
-    pub fn from_ones(size: usize, ones: &[(usize, usize)]) -> Self {
-        let mut result = Self::zeroed(size);
-        for (i, j) in ones {
-            result.set(*i, *j, true);
+    pub fn from_iter<I: Iterator<Item = (usize, usize)>>(size: usize, iter: I) -> Self {
+        let mut matrix = Self::zeroed(size);
+        for (i, j) in iter {
+            matrix.set(i, j, true);
         }
-        result
+        matrix
     }
 
     #[inline]

@@ -87,14 +87,16 @@ impl DirectedAcyclicGraph {
         }
     }
 
-    /// Constructs a DAG from a list of edges.
+    /// Constructs a DAG from an iterator of edges.
     ///
     /// Requires `u < vertex_count && v < vertex_count && u < v` for every edge
     /// `(u, v)` in `edges`.  Panics otherwise.
-    pub fn from_edges(vertex_count: usize, edges: &[(usize, usize)]) -> Self {
-        Self {
-            adjacency_matrix: StrictlyUpperTriangularLogicalMatrix::from_ones(vertex_count, edges),
-        }
+    pub fn from_edges_iter<I: Iterator<Item = (usize, usize)>>(
+        vertex_count: usize,
+        edges: I,
+    ) -> Self {
+        let adjacency_matrix = StrictlyUpperTriangularLogicalMatrix::from_iter(vertex_count, edges);
+        Self { adjacency_matrix }
     }
 
     #[inline]
@@ -242,7 +244,8 @@ mod tests {
             (5, 10),
             (6, 12),
         ];
-        let dag = DirectedAcyclicGraph::from_edges(12 + 1, &divisibility_poset_pairs);
+        let dag =
+            DirectedAcyclicGraph::from_edges_iter(12 + 1, divisibility_poset_pairs.into_iter());
         let dag = algorithm::transitive_reduction(&dag);
         let dag_pairs: HashSet<(usize, usize)> =
             HashSet::from_iter(traversal::iter_edges_dfs_post_order(&dag));
@@ -359,7 +362,10 @@ mod tests {
 
         let pairs = integer_divisibility_poset.get_pairs();
 
-        let dag = DirectedAcyclicGraph::from_edges(integer_divisibility_poset.number + 1, &pairs);
+        let dag = DirectedAcyclicGraph::from_edges_iter(
+            integer_divisibility_poset.number + 1,
+            pairs.iter().cloned(),
+        );
 
         for (left, right) in pairs {
             assert!(dag.get_edge(left, right), "({}, {})", left, right);
