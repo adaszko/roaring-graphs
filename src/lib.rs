@@ -186,6 +186,7 @@ impl DirectedAcyclicGraph {
         self.adjacency_matrix.set(u, v, exists);
     }
 
+    /// The order of edges is expedient to the graph representation.
     pub fn iter_edges(&self) -> EdgesIterator {
         self.adjacency_matrix.iter_ones()
     }

@@ -1,9 +1,41 @@
 use fixedbitset::FixedBitSet;
 
+const fn strictly_upper_triangular_matrix_capacity(n: usize) -> usize {
+    (n * n - n) / 2
+}
+
+/// A zero-indexed
+/// [packed](https://www.intel.com/content/www/us/en/develop/documentation/onemkl-developer-reference-c/top/lapack-routines/matrix-storage-schemes-for-lapack-routines.html)
+/// matrix of booleans.
 #[derive(Clone)]
 pub struct StrictlyUpperTriangularLogicalMatrix {
     size: usize,
     matrix: FixedBitSet,
+}
+
+pub struct RowColumnPairsIterator {
+    size: usize,
+    i: usize,
+    j: usize,
+}
+
+impl<'a> Iterator for RowColumnPairsIterator {
+    type Item = (usize, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.j < self.size {
+            let result = (self.i, self.j);
+            self.j += 1;
+            return Some(result);
+        }
+        if self.i < self.size {
+            let result = (self.i, self.j);
+            self.i += 1;
+            self.j = self.i + 1;
+            return Some(result);
+        }
+        None
+    }
 }
 
 // Reference: https://www.intel.com/content/www/us/en/develop/documentation/onemkl-developer-reference-c/top/lapack-routines/matrix-storage-schemes-for-lapack-routines.html
@@ -80,7 +112,7 @@ impl<'a> Iterator for NeighboursIterator<'a> {
 
 impl StrictlyUpperTriangularLogicalMatrix {
     pub fn zeroed(size: usize) -> Self {
-        let capacity = (size * size - size) / 2;
+        let capacity = strictly_upper_triangular_matrix_capacity(size);
         Self {
             size,
             matrix: FixedBitSet::with_capacity(capacity),
@@ -115,6 +147,17 @@ impl StrictlyUpperTriangularLogicalMatrix {
         let current = self.matrix[index];
         self.matrix.set(index, value);
         current
+    }
+
+    /// Iterates over (i, j) pairs in an order that favors CPU cache locality.
+    /// If your graph algorithm can process edges in an arbitrary order, it is
+    /// recommended you use this iterator.
+    pub fn iter_row_column_pairs(&self) -> RowColumnPairsIterator {
+        RowColumnPairsIterator {
+            size: self.size,
+            i: 0,
+            j: 1,
+        }
     }
 
     pub fn iter_ones(&self) -> EdgesIterator {
