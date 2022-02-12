@@ -4,8 +4,8 @@ const fn strictly_upper_triangular_matrix_capacity(n: usize) -> usize {
     (n * n - n) / 2
 }
 
-/// A zero-indexed
-/// [packed](https://www.intel.com/content/www/us/en/develop/documentation/onemkl-developer-reference-c/top/lapack-routines/matrix-storage-schemes-for-lapack-routines.html)
+/// A zero-indexed [row-major
+/// packed](https://www.intel.com/content/www/us/en/develop/documentation/onemkl-developer-reference-c/top/lapack-routines/matrix-storage-schemes-for-lapack-routines.html)
 /// matrix of booleans.
 #[derive(Clone)]
 pub struct StrictlyUpperTriangularLogicalMatrix {
