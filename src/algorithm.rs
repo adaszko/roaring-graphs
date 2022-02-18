@@ -45,11 +45,16 @@ mod tests {
     fn prop_transitive_closure_and_transitive_reduction_intersection_equals_transitive_reduction_modulo_order(
         dag: DirectedAcyclicGraph,
     ) -> bool {
+        println!("{:?}", dag);
         let transitive_closure: HashSet<(usize, usize)> =
             transitive_closure(&dag).iter_edges().collect();
         let transitive_reduction: HashSet<(usize, usize)> =
             transitive_reduction(&dag).iter_edges().collect();
-        transitive_closure == transitive_reduction
+        let intersection: HashSet<(usize, usize)> = transitive_closure
+            .intersection(&transitive_reduction)
+            .cloned()
+            .collect();
+        intersection == transitive_reduction
     }
 
     #[test]

@@ -179,7 +179,7 @@ pub fn break_at(
     let right_vertex_count = vertex_count - left_vertex_count;
     let mut right = DirectedAcyclicGraph::empty(right_vertex_count);
     for u in left_vertex_count..vertex_count {
-        for v in (left_vertex_count + 1)..vertex_count {
+        for v in (u + 1)..vertex_count {
             right.set_edge(
                 u - left_vertex_count,
                 v - left_vertex_count,
@@ -451,5 +451,18 @@ mod tests {
         assert_eq!(dag.iter_children(11).collect::<Vec<usize>>(), vec![]);
         assert_eq!(dag.iter_children(9).collect::<Vec<usize>>(), vec![]);
         assert_eq!(dag.iter_children(8).collect::<Vec<usize>>(), vec![]);
+        assert_eq!(dag.iter_children(7).collect::<Vec<usize>>(), vec![]);
+        assert_eq!(dag.iter_children(6).collect::<Vec<usize>>(), vec![12]);
+        assert_eq!(dag.iter_children(5).collect::<Vec<usize>>(), vec![10]);
+        assert_eq!(dag.iter_children(4).collect::<Vec<usize>>(), vec![8, 12]);
+        assert_eq!(dag.iter_children(3).collect::<Vec<usize>>(), vec![6, 9, 12]);
+        assert_eq!(
+            dag.iter_children(2).collect::<Vec<usize>>(),
+            vec![4, 6, 8, 10, 12]
+        );
+        assert_eq!(
+            dag.iter_children(1).collect::<Vec<usize>>(),
+            vec![2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
+        );
     }
 }
