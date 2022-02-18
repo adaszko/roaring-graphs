@@ -3,14 +3,11 @@
 //! represented as [Strictly Upper Triangular
 //! matrices](https://mathworld.wolfram.com/StrictlyUpperTriangularMatrix.html).
 //!
-//! This crate is best suited for cases when you need to work with graphs and
-//! you know upfront they are going to fall within the the DAG category. In such
-//! case, the genericity of other graph crates may result in runtime bugs that
-//! could have been avoided given a more restrictive graph representation. Some
-//! graph algorithms also have better time complexity if you assume you're
-//! working with a certain class of graphs.
-//!
-//! There are several assumptions this crate imposes on *your* code:
+//! A create for working with DAGs where it is known upfront that graphs are
+//! directed and there are no cycles.  This crate is not a good fit if you need
+//! to e.g. build a graph and check if there cycles in it.
+
+//! There are several assumptions imposed on *your* code:
 //!
 //! 1. DAG vertices are integer numbers (`usize`) which is used to trivially
 //!    test whether adding an edge would form a cycle: edges are only allowed to
@@ -21,18 +18,17 @@
 //!
 //! In exchange for these assumptions you get these useful properties:
 //! * **Correctness**: It's not possible to have cycles by construction!
-//! * **Low memory usage**: The representation is *compact*: edges are just bits
-//!   in a bit set.  The implementation uses just `(|V|*|V|-|V|)/2` *bits* of
-//!   memory + a constant.
-//! * **Good CPU cache locality**: Edges are stored in a [row-major packed
+//! * **Compactness**: Edges are just bits in a bit set.  The implementation
+//!   uses just `(|V|*|V|-|V|)/2` *bits* of memory + a constant.
+//! * **CPU cache locality**: Edges are stored in a [row-major packed
 //!   representation](https://www.intel.com/content/www/us/en/develop/documentation/onemkl-developer-reference-c/top/lapack-routines/matrix-storage-schemes-for-lapack-routines.html)
 //!   so that iteration over the neighbours of a vertex is just an iteration
 //!   over *consecutive* bits in a bit set.
 //! * **Low cognitive overhead**: No need to deal with type-level shenenigans to
 //!   get basic tasks done.
-//! * **Efficiency**: Generating a random DAG is a linear operation, contrary to
-//!   a fully general graph representation.  That was actually the original
-//!   motivation for writing this crate.  It can be used with
+//! * **Asymptotic complexity reduction**: Generating a random DAG is a `O(|E|)`
+//!   operation.  That was actually the original motivation for writing this
+//!   crate.  It can be used with
 //!   [quickcheck](https://crates.io/crates/quickcheck) efficiently.  In fact,
 //!   [`DirectedAcyclicGraph`] implements [`quickcheck::Arbitrary`] (with
 //!   meaningful shrinking).
