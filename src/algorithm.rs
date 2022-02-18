@@ -39,8 +39,7 @@ pub fn transitive_reduction(dag: &DirectedAcyclicGraph) -> DirectedAcyclicGraph 
 }
 
 /// Returns a new DAG that is a [transitive
-/// closure](https://en.wikipedia.org/wiki/Transitive_closure) of a DAG.  Note
-/// that this is equivalent to computing a reachability matrix.
+/// closure](https://en.wikipedia.org/wiki/Transitive_closure) of a DAG.
 pub fn transitive_closure(dag: &DirectedAcyclicGraph) -> DirectedAcyclicGraph {
     let mut result = dag.clone();
 

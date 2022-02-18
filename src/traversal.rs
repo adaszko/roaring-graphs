@@ -49,6 +49,8 @@ impl<'a> Iterator for BfsVerticesIterator<'a> {
     }
 }
 
+/// Visit all vertices reachable from `vertex` in a breadth-first-search (BFS)
+/// order.
 pub fn iter_descendants_bfs(dag: &DirectedAcyclicGraph, vertex: usize) -> BfsVerticesIterator {
     BfsVerticesIterator {
         dag,
@@ -57,6 +59,7 @@ pub fn iter_descendants_bfs(dag: &DirectedAcyclicGraph, vertex: usize) -> BfsVer
     }
 }
 
+/// Visit all vertices of a DAG in a breadth-first-search (BFS) order.
 pub fn iter_vertices_bfs(dag: &DirectedAcyclicGraph) -> BfsVerticesIterator {
     BfsVerticesIterator {
         dag,
@@ -88,6 +91,8 @@ impl<'a> Iterator for DfsVerticesIterator<'a> {
     }
 }
 
+/// Visit all vertices reachable from `vertex` in a depth-first-search (DFS)
+/// order.
 pub fn iter_descendants_dfs(dag: &DirectedAcyclicGraph, vertex: usize) -> DfsVerticesIterator {
     DfsVerticesIterator {
         dag,
@@ -96,6 +101,7 @@ pub fn iter_descendants_dfs(dag: &DirectedAcyclicGraph, vertex: usize) -> DfsVer
     }
 }
 
+/// Visit all vertices of a DAG in a depth-first-search (DFS) order.
 pub fn iter_vertices_dfs(dag: &DirectedAcyclicGraph) -> DfsVerticesIterator {
     DfsVerticesIterator {
         dag,
@@ -142,6 +148,9 @@ impl<'a> Iterator for DfsPostOrderVerticesIterator<'a> {
     }
 }
 
+/// Visit all vertices reachable from `vertex` in a depth-first-search
+/// postorder, i.e. emitting vertices only after all their descendants have been
+/// emitted first.
 pub fn iter_descendants_dfs_post_order(
     dag: &DirectedAcyclicGraph,
     vertex: usize,
@@ -153,6 +162,8 @@ pub fn iter_descendants_dfs_post_order(
     }
 }
 
+/// Visit all vertices of a DAG in a depth-first-search postorder, i.e. emitting
+/// vertices only after all their descendants have been emitted first.
 pub fn iter_vertices_dfs_post_order(dag: &DirectedAcyclicGraph) -> DfsPostOrderVerticesIterator {
     DfsPostOrderVerticesIterator {
         dag,

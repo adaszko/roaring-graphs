@@ -60,6 +60,7 @@ pub use strictly_upper_triangular_logical_matrix::StrictlyUpperTriangularLogical
 pub mod algorithm;
 pub mod traversal;
 
+/// A mutable, single-threaded directed acyclic graph.
 #[derive(Clone)]
 pub struct DirectedAcyclicGraph {
     adjacency_matrix: StrictlyUpperTriangularLogicalMatrix,
