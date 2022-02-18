@@ -419,7 +419,7 @@ mod tests {
     }
 
     #[test]
-    fn divisibility_poset_12_neighbours() {
+    fn divisibility_poset_12_children() {
         let divisibility_poset_pairs = vec![
             (1, 2),
             (1, 3),
