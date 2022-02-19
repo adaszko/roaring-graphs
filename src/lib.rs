@@ -98,6 +98,20 @@ impl DirectedAcyclicGraph {
         Self { adjacency_matrix }
     }
 
+    /// Generate a random DAG sampling edges from `edges_distribution`.
+    ///
+    /// For example, to generate a random DAG with a probability `1/2` of having
+    /// an edge between any two of `321` vertices, do:
+    ///
+    /// ```
+    /// use diag::DirectedAcyclicGraph;
+    /// use rand::rngs::StdRng;
+    /// use rand::SeedableRng;
+    /// use rand::distributions::Bernoulli;
+    ///
+    /// let mut rng = StdRng::seed_from_u64(123);
+    /// let dag = DirectedAcyclicGraph::random(321, &mut rng, Bernoulli::new(0.5).unwrap());
+    /// ```
     pub fn random<R: Rng, D: Distribution<bool> + Copy>(
         vertex_count: usize,
         rng: &mut R,
