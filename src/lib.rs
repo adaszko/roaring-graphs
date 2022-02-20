@@ -44,9 +44,10 @@
 //!
 //! # Entry points
 //!
-//! See either [`DirectedAcyclicGraph::empty`] or
-//! [`DirectedAcyclicGraph::from_edges_iter`] for the "entry point" to this
-//! crate.
+//! See either [`DirectedAcyclicGraph::empty`],
+//! [`DirectedAcyclicGraph::from_edges_iter`], or
+//! [`DirectedAcyclicGraph::from_adjacency_matrix`] for the "entry point" to
+//! this crate.
 
 use std::io::Write;
 
@@ -126,6 +127,11 @@ impl DirectedAcyclicGraph {
         dag
     }
 
+    /// Construct a DAG from an pre-computed adjacency matrix.
+    pub fn from_adjacency_matrix(adjacency_matrix: StrictlyUpperTriangularLogicalMatrix) -> Self {
+        Self { adjacency_matrix }
+    }
+
     #[inline]
     pub fn get_vertex_count(&self) -> usize {
         self.adjacency_matrix.size()
@@ -156,6 +162,11 @@ impl DirectedAcyclicGraph {
     /// DAG.
     pub fn iter_children(&self, u: usize) -> impl Iterator<Item = usize> + '_ {
         self.adjacency_matrix.iter_ones_at_row(u)
+    }
+
+    /// Consume self and return the underlying adjacency matrix.
+    pub fn into_adjacency_matrix(self) -> StrictlyUpperTriangularLogicalMatrix {
+        self.adjacency_matrix
     }
 }
 
