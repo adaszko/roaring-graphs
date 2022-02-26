@@ -105,7 +105,7 @@ impl DirectedAcyclicGraph {
     /// an edge between any two of `321` vertices, do:
     ///
     /// ```
-    /// use diag::DirectedAcyclicGraph;
+    /// use crate::DirectedAcyclicGraph;
     /// use rand::rngs::StdRng;
     /// use rand::SeedableRng;
     /// use rand::distributions::Bernoulli;

@@ -1,11 +1,11 @@
 [package]
-name = "diag"
+name = "dograph"
 version = "0.8.3"
 edition = "2021"
 authors = ["Adam Szkoda <adaszko@gmail.com>"]
 description = "Directed Acyclic Graphs with integer vertices represented as a Strictly Upper Triangular Matrix stored in a bit set"
-homepage = "https://github.com/adaszko/diag"
-repository = "https://github.com/adaszko/diag"
+homepage = "https://github.com/adaszko/dograph"
+repository = "https://github.com/adaszko/dograph"
 keywords = ["dag", "graph"]
 license = "GPL-3.0"
 
