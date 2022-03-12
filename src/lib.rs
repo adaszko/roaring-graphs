@@ -3,9 +3,8 @@
 //! represented as [Strictly Upper Triangular
 //! matrices](https://mathworld.wolfram.com/StrictlyUpperTriangularMatrix.html).
 //!
-//! A create for working with DAGs where it is known upfront that graphs are
-//! directed and there are no cycles.  This crate is not a good fit if you need
-//! to e.g. build a graph and check if there cycles in it.
+//! A create for working with DAGs where it is known upfront (i.e. statically)
+//! that graphs are directed and there are no cycles.
 
 //! There are several assumptions imposed on *your* code:
 //!
@@ -17,7 +16,7 @@
 //!    growing/shrinking generally requires a new graph to be constructed.
 //!
 //! In exchange for these assumptions you get these useful properties:
-//! * **Correctness**: It's not possible to have cycles by construction!
+//! * **Correctness**: Cycles (an illegal state) are unrepresentable.
 //! * **Compactness**: Edges are just bits in a bit set.  The implementation
 //!   uses just `(|V|*|V|-|V|)/2` *bits* of memory + a constant.
 //! * **CPU cache locality**: Edges are stored in a [row-major packed
