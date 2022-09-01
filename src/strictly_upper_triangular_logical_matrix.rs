@@ -47,7 +47,7 @@ pub fn iter_matrix(size: usize) -> CacheFriendlyMatrixIterator {
 /// A zero-indexed [row-major
 /// packed](https://www.intel.com/content/www/us/en/develop/documentation/onemkl-developer-reference-c/top/lapack-routines/matrix-storage-schemes-for-lapack-routines.html)
 /// matrix of booleans.
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct StrictlyUpperTriangularLogicalMatrix {
     size: usize,
     matrix: FixedBitSet,
