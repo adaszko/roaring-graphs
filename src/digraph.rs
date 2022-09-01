@@ -58,6 +58,26 @@ impl DirectedGraph {
         Some(roots[0])
     }
 
+    /// Iterates over vertices `v` such that there's an edge `(u, v)` in the graph.
+    pub fn extend_with_children(&self, children: &mut Vec<usize>, u: usize) {
+        assert!(u < self.vertex_count);
+        for v in 0..self.vertex_count {
+            if self.adjacency_matrix[u * self.vertex_count + v] {
+                children.push(v);
+            }
+        }
+    }
+
+    /// Iterates over vertices `u` such that there's an edge `(u, v)` in the graph.
+    pub fn extend_with_parents(&self, parents: &mut Vec<usize>, v: usize) {
+        assert!(v < self.vertex_count);
+        for u in 0..self.vertex_count {
+            if self.adjacency_matrix[u * self.vertex_count + v] {
+                parents.push(u);
+            }
+        }
+    }
+
     /// Outputs the DAG in the [Graphviz DOT](https://graphviz.org/) format.
     pub fn to_dot<W: Write>(&self, output: &mut W) -> std::result::Result<(), std::io::Error> {
         writeln!(output, "digraph tree_{} {{", self.get_vertex_count())?;
@@ -147,4 +167,81 @@ pub fn arb_tree(max_vertex_count: usize) -> BoxedStrategy<DirectedGraph> {
             })
         })
         .boxed()
+}
+
+
+/// See [`iter_vertices_dfs`].
+pub struct DfsVerticesIterator<'a> {
+    digraph: &'a DirectedGraph,
+    visited: FixedBitSet,
+    to_visit: Vec<usize>,
+}
+
+impl<'a> Iterator for DfsVerticesIterator<'a> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(u) = self.to_visit.pop() {
+            if self.visited[u] {
+                continue;
+            }
+            self.digraph.extend_with_children(&mut self.to_visit, u);
+            self.visited.insert(u);
+            return Some(u);
+        }
+        None
+    }
+}
+
+/// Visit all vertices reachable from `vertex` in a depth-first-search (DFS)
+/// order.
+pub fn iter_descendants_dfs(digraph: &DirectedGraph, vertex: usize) -> DfsVerticesIterator {
+    DfsVerticesIterator {
+        digraph,
+        visited: FixedBitSet::with_capacity(digraph.get_vertex_count()),
+        to_visit: vec![vertex],
+    }
+}
+
+pub struct DfsAncestorsIterator<'a> {
+    digraph: &'a DirectedGraph,
+    visited: FixedBitSet,
+    to_visit: Vec<usize>,
+}
+
+impl<'a> Iterator for DfsAncestorsIterator<'a> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(u) = self.to_visit.pop() {
+            if self.visited[u] {
+                continue;
+            }
+            self.digraph.extend_with_parents(&mut self.to_visit, u);
+            self.visited.insert(u);
+            return Some(u);
+        }
+        None
+    }
+}
+
+
+pub fn iter_ancestors_dfs(digraph: &DirectedGraph, vertex: usize) -> DfsAncestorsIterator {
+    DfsAncestorsIterator {
+        digraph,
+        visited: FixedBitSet::with_capacity(digraph.get_vertex_count()),
+        to_visit: vec![vertex],
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    proptest! {
+        #[test]
+        fn arb_tree_has_exactly_one_root(tree in arb_tree(100)) {
+            prop_assert!(tree.find_tree_root().is_some());
+        }
+    }
 }
