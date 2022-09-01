@@ -48,15 +48,18 @@
 //! [`DirectedAcyclicGraph::from_adjacency_matrix`] for the "entry point" to
 //! this crate.
 
-use std::io::Write;
 use std::collections::VecDeque;
+use std::io::Write;
 
+use fixedbitset::FixedBitSet;
+use proptest::prelude::*;
 use quickcheck::{Arbitrary, Gen};
 use rand::{prelude::StdRng, Rng, SeedableRng};
 use rand_distr::{Bernoulli, Distribution};
-use fixedbitset::FixedBitSet;
 
-use crate::strictly_upper_triangular_logical_matrix::StrictlyUpperTriangularLogicalMatrix;
+use crate::strictly_upper_triangular_logical_matrix::{
+    self, strictly_upper_triangular_matrix_capacity, StrictlyUpperTriangularLogicalMatrix,
+};
 
 /// A mutable, single-threaded directed acyclic graph.
 #[derive(Clone)]
@@ -124,6 +127,20 @@ impl DirectedAcyclicGraph {
         dag
     }
 
+    pub fn from_random_edges(vertex_count: usize, edges: &[bool]) -> Self {
+        assert_eq!(
+            edges.len(),
+            strictly_upper_triangular_matrix_capacity(vertex_count)
+        );
+        let mut bitset = FixedBitSet::with_capacity(edges.len());
+        for (index, value) in edges.iter().enumerate() {
+            bitset.set(index, *value);
+        }
+        let matrix = StrictlyUpperTriangularLogicalMatrix::from_bitset(vertex_count, bitset);
+        let dag = DirectedAcyclicGraph::from_adjacency_matrix(matrix);
+        dag
+    }
+
     /// Construct a DAG from an pre-computed adjacency matrix.
     pub fn from_adjacency_matrix(adjacency_matrix: StrictlyUpperTriangularLogicalMatrix) -> Self {
         Self { adjacency_matrix }
@@ -161,9 +178,207 @@ impl DirectedAcyclicGraph {
         self.adjacency_matrix.iter_ones_at_row(u)
     }
 
+    pub fn extend_with_parents(&self, v: usize, parents: &mut Vec<usize>) {
+        for u in 0..v {
+            if self.get_edge(u, v) {
+                parents.push(u);
+            }
+        }
+    }
+
     /// Consume self and return the underlying adjacency matrix.
     pub fn into_adjacency_matrix(self) -> StrictlyUpperTriangularLogicalMatrix {
         self.adjacency_matrix
+    }
+
+    /// Visit all vertices reachable from `vertex` in a depth-first-search (DFS)
+    /// order.
+    pub fn iter_descendants_dfs(&self, vertex: usize) -> DfsVerticesIterator {
+        DfsVerticesIterator {
+            dag: self,
+            visited: FixedBitSet::with_capacity(self.get_vertex_count()),
+            to_visit: vec![vertex],
+        }
+    }
+
+    pub fn iter_ancestors_dfs(&self, vertex: usize) -> DfsAncestorsIterator {
+        DfsAncestorsIterator {
+            dag: self,
+            visited: FixedBitSet::with_capacity(self.get_vertex_count()),
+            to_visit: vec![vertex],
+        }
+    }
+
+    /// Visit all vertices of a DAG in a depth-first-search (DFS) order.
+    pub fn iter_vertices_dfs(&self) -> DfsVerticesIterator {
+        DfsVerticesIterator {
+            dag: self,
+            visited: FixedBitSet::with_capacity(self.get_vertex_count()),
+            to_visit: self.get_vertices_without_incoming_edges(),
+        }
+    }
+
+    /// Visit all vertices of a DAG in a depth-first-search postorder, i.e. emitting
+    /// vertices only after all their descendants have been emitted first.
+    pub fn iter_vertices_dfs_post_order(&self) -> DfsPostOrderVerticesIterator {
+        DfsPostOrderVerticesIterator {
+            dag: self,
+            visited: FixedBitSet::with_capacity(self.get_vertex_count()),
+            to_visit: self.get_vertices_without_incoming_edges(),
+        }
+    }
+
+    /// Visit nodes in a depth-first-search (DFS) emitting edges in postorder, i.e.
+    /// each node after all its descendants have been emitted.
+    ///
+    /// Note that when a DAG represents a [partially ordered
+    /// set](https://en.wikipedia.org/wiki/Partially_ordered_set), this function iterates over pairs of
+    /// that poset.  It may be necessary to first compute either a [`crate::transitive_reduction`] of a
+    /// DAG, to only get the minimal set of pairs spanning the entire poset, or a
+    /// [`crate::transitive_closure`] to get all the pairs of that poset.
+    pub fn iter_edges_dfs_post_order(&self) -> DfsPostOrderEdgesIterator {
+        DfsPostOrderEdgesIterator {
+            dag: self,
+            inner: self.iter_vertices_dfs_post_order(),
+            seen_vertices: FixedBitSet::with_capacity(self.get_vertex_count()),
+            buffer: Default::default(),
+        }
+    }
+
+    /// Visit all vertices reachable from `vertex` in a depth-first-search
+    /// postorder, i.e. emitting vertices only after all their descendants have been
+    /// emitted first.
+    pub fn iter_descendants_dfs_post_order(&self, vertex: usize) -> DfsPostOrderVerticesIterator {
+        DfsPostOrderVerticesIterator {
+            dag: self,
+            visited: FixedBitSet::with_capacity(self.get_vertex_count()),
+            to_visit: vec![vertex],
+        }
+    }
+
+    /// Combines [`iter_vertices_dfs_post_order`], [`Iterator::collect()`] and
+    /// [`slice::reverse()`] to get a topologically ordered sequence of vertices of a
+    /// DAG.
+    pub fn get_topologically_ordered_vertices(&self) -> Vec<usize> {
+        let mut result: Vec<usize> = Vec::with_capacity(self.get_vertex_count());
+        result.extend(self.iter_vertices_dfs_post_order());
+        result.reverse();
+        result
+    }
+
+    /// Computes a mapping: vertex -> set of vertices that are descendants of vertex.
+    pub fn get_descendants(&self) -> Vec<FixedBitSet> {
+        let mut descendants: Vec<FixedBitSet> = vec![FixedBitSet::default(); self.get_vertex_count()];
+
+        for u in (0..self.get_vertex_count()).rev() {
+            let mut u_descendants = FixedBitSet::default();
+            for v in self.iter_children(u) {
+                u_descendants.union_with(&descendants[v]);
+                u_descendants.grow(v + 1);
+                u_descendants.set(v, true);
+            }
+            descendants[u] = u_descendants;
+        }
+
+        descendants
+    }
+
+    /// Returns a new DAG that is a [transitive
+    /// reduction](https://en.wikipedia.org/wiki/Transitive_reduction) of a DAG.
+    pub fn transitive_reduction(&self) -> DirectedAcyclicGraph {
+        let mut result = self.clone();
+
+        let descendants = self.get_descendants();
+        for u in 0..self.get_vertex_count() {
+            for v in self.iter_children(u) {
+                for w in descendants[v].ones() {
+                    if w == v {
+                        continue;
+                    }
+                    result.set_edge(u, w, false);
+                }
+            }
+        }
+        result
+    }
+
+    /// Returns a new DAG that is a [transitive
+    /// closure](https://en.wikipedia.org/wiki/Transitive_closure) of a DAG.
+    pub fn transitive_closure(&self) -> DirectedAcyclicGraph {
+        let mut result = self.clone();
+
+        // http://www.compsci.hunter.cuny.edu/~sweiss/course_materials/csci335/lecture_notes/chapter08.pdf
+
+        let descendants = self.get_descendants();
+        for u in 0..self.get_vertex_count() {
+            for v in descendants[u].ones() {
+                result.set_edge(u, v, true);
+            }
+        }
+
+        result
+    }
+
+    /// Returns a set "seed" vertices of a DAG from which a traversal may start so
+    /// that the process covers all vertices in the graph.
+    pub fn get_vertices_without_incoming_edges(&self) -> Vec<usize> {
+        let incoming_edges_count = {
+            let mut incoming_edges_count: Vec<usize> = vec![0; self.get_vertex_count()];
+            for (_, v) in self.iter_edges() {
+                incoming_edges_count[v] += 1;
+            }
+            incoming_edges_count
+        };
+
+        let vertices_without_incoming_edges: Vec<usize> = incoming_edges_count
+            .into_iter()
+            .enumerate()
+            .filter(|(_, indegree)| *indegree == 0)
+            .map(|(vertex, _)| vertex)
+            .collect();
+
+        vertices_without_incoming_edges
+    }
+
+
+    /// Visit all vertices reachable from `vertex` in a breadth-first-search (BFS)
+    /// order.
+    pub fn iter_descendants_bfs(&self, vertex: usize) -> BfsVerticesIterator {
+        BfsVerticesIterator {
+            dag: self,
+            visited: FixedBitSet::with_capacity(self.get_vertex_count()),
+            to_visit: vec![vertex].into(),
+        }
+    }
+
+    /// Visit all vertices of a DAG in a breadth-first-search (BFS) order.
+    pub fn iter_vertices_bfs(&self) -> BfsVerticesIterator {
+        BfsVerticesIterator {
+            dag: self,
+            visited: FixedBitSet::with_capacity(self.get_vertex_count()),
+            to_visit: self.get_vertices_without_incoming_edges().into(),
+        }
+    }
+
+    /// Outputs the DAG in the [Graphviz DOT](https://graphviz.org/) format.
+    pub fn to_dot<W: Write>(
+        &self,
+        output: &mut W,
+    ) -> std::result::Result<(), std::io::Error> {
+        writeln!(output, "digraph dag_{} {{", self.get_vertex_count())?;
+
+        for elem in 0..self.get_vertex_count() {
+            writeln!(output, "\t_{}[label=\"{}\"];", elem, elem)?;
+        }
+
+        writeln!(output, "\n")?;
+
+        for (left, right) in self.iter_edges() {
+            writeln!(output, "\t_{} -> _{};", left, right)?;
+        }
+
+        writeln!(output, "}}")?;
+        Ok(())
     }
 }
 
@@ -210,27 +425,6 @@ pub fn break_at(
     (left, right)
 }
 
-/// Outputs the DAG in the [Graphviz DOT](https://graphviz.org/) format.
-pub fn to_dot<W: Write>(
-    dag: &DirectedAcyclicGraph,
-    output: &mut W,
-) -> std::result::Result<(), std::io::Error> {
-    writeln!(output, "digraph dag_{} {{", dag.get_vertex_count())?;
-
-    for elem in 0..dag.get_vertex_count() {
-        writeln!(output, "\t_{}[label=\"{}\"];", elem, elem)?;
-    }
-
-    writeln!(output, "\n")?;
-
-    for (left, right) in dag.iter_edges() {
-        writeln!(output, "\t_{} -> _{};", left, right)?;
-    }
-
-    writeln!(output, "}}")?;
-    Ok(())
-}
-
 impl Arbitrary for DirectedAcyclicGraph {
     fn arbitrary(g: &mut Gen) -> Self {
         let vertex_count = g.size();
@@ -251,80 +445,19 @@ impl Arbitrary for DirectedAcyclicGraph {
     }
 }
 
-
-/// Computes a mapping: vertex -> set of vertices that are descendants of vertex.
-pub fn get_descendants(dag: &DirectedAcyclicGraph) -> Vec<FixedBitSet> {
-    let mut descendants: Vec<FixedBitSet> = vec![FixedBitSet::default(); dag.get_vertex_count()];
-
-    for u in (0..dag.get_vertex_count()).rev() {
-        let mut u_descendants = FixedBitSet::default();
-        for v in dag.iter_children(u) {
-            u_descendants.union_with(&descendants[v]);
-            u_descendants.grow(v + 1);
-            u_descendants.set(v, true);
-        }
-        descendants[u] = u_descendants;
-    }
-
-    descendants
-}
-
-/// Returns a new DAG that is a [transitive
-/// reduction](https://en.wikipedia.org/wiki/Transitive_reduction) of a DAG.
-pub fn transitive_reduction(dag: &DirectedAcyclicGraph) -> DirectedAcyclicGraph {
-    let mut result = dag.clone();
-
-    let descendants = get_descendants(dag);
-    for u in 0..dag.get_vertex_count() {
-        for v in dag.iter_children(u) {
-            for w in descendants[v].ones() {
-                if w == v {
-                    continue;
-                }
-                result.set_edge(u, w, false);
-            }
-        }
-    }
-    result
-}
-
-/// Returns a new DAG that is a [transitive
-/// closure](https://en.wikipedia.org/wiki/Transitive_closure) of a DAG.
-pub fn transitive_closure(dag: &DirectedAcyclicGraph) -> DirectedAcyclicGraph {
-    let mut result = dag.clone();
-
-    // http://www.compsci.hunter.cuny.edu/~sweiss/course_materials/csci335/lecture_notes/chapter08.pdf
-
-    let descendants = get_descendants(dag);
-    for u in 0..dag.get_vertex_count() {
-        for v in descendants[u].ones() {
-            result.set_edge(u, v, true);
-        }
-    }
-
-    result
-}
-
-
-/// Returns a set "seed" vertices of a DAG from which a traversal may start so
-/// that the process covers all vertices in the graph.
-pub fn get_vertices_without_incoming_edges(dag: &DirectedAcyclicGraph) -> Vec<usize> {
-    let incoming_edges_count = {
-        let mut incoming_edges_count: Vec<usize> = vec![0; dag.get_vertex_count()];
-        for (_, v) in dag.iter_edges() {
-            incoming_edges_count[v] += 1;
-        }
-        incoming_edges_count
-    };
-
-    let vertices_without_incoming_edges: Vec<usize> = incoming_edges_count
-        .into_iter()
-        .enumerate()
-        .filter(|(_, indegree)| *indegree == 0)
-        .map(|(vertex, _)| vertex)
-        .collect();
-
-    vertices_without_incoming_edges
+pub fn arb_dag(max_vertex_count: usize) -> BoxedStrategy<DirectedAcyclicGraph> {
+    (1..max_vertex_count)
+        .prop_flat_map(|vertex_count| {
+            let max_edges_count =
+                strictly_upper_triangular_logical_matrix::strictly_upper_triangular_matrix_capacity(
+                    vertex_count,
+                );
+            proptest::bits::bool_vec::between(0, max_edges_count).prop_flat_map(move |boolvec| {
+                let dag = DirectedAcyclicGraph::from_random_edges(vertex_count, &boolvec);
+                Just(dag).boxed()
+            })
+        })
+        .boxed()
 }
 
 /// See [`iter_vertices_bfs`].
@@ -351,25 +484,6 @@ impl<'a> Iterator for BfsVerticesIterator<'a> {
     }
 }
 
-/// Visit all vertices reachable from `vertex` in a breadth-first-search (BFS)
-/// order.
-pub fn iter_descendants_bfs(dag: &DirectedAcyclicGraph, vertex: usize) -> BfsVerticesIterator {
-    BfsVerticesIterator {
-        dag,
-        visited: FixedBitSet::with_capacity(dag.get_vertex_count()),
-        to_visit: vec![vertex].into(),
-    }
-}
-
-/// Visit all vertices of a DAG in a breadth-first-search (BFS) order.
-pub fn iter_vertices_bfs(dag: &DirectedAcyclicGraph) -> BfsVerticesIterator {
-    BfsVerticesIterator {
-        dag,
-        visited: FixedBitSet::with_capacity(dag.get_vertex_count()),
-        to_visit: get_vertices_without_incoming_edges(dag).into(),
-    }
-}
-
 /// See [`iter_vertices_dfs`].
 pub struct DfsVerticesIterator<'a> {
     dag: &'a DirectedAcyclicGraph,
@@ -393,27 +507,32 @@ impl<'a> Iterator for DfsVerticesIterator<'a> {
     }
 }
 
-/// Visit all vertices reachable from `vertex` in a depth-first-search (DFS)
-/// order.
-pub fn iter_descendants_dfs(dag: &DirectedAcyclicGraph, vertex: usize) -> DfsVerticesIterator {
-    DfsVerticesIterator {
-        dag,
-        visited: FixedBitSet::with_capacity(dag.get_vertex_count()),
-        to_visit: vec![vertex],
+
+pub struct DfsAncestorsIterator<'a> {
+    dag: &'a DirectedAcyclicGraph,
+    visited: FixedBitSet,
+    to_visit: Vec<usize>,
+}
+
+
+impl<'a> Iterator for DfsAncestorsIterator<'a> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        while let Some(u) = self.to_visit.pop() {
+            if self.visited[u] {
+                continue;
+            }
+            self.dag.extend_with_parents(u, &mut self.to_visit);
+            self.visited.insert(u);
+            return Some(u);
+        }
+        None
     }
 }
 
-/// Visit all vertices of a DAG in a depth-first-search (DFS) order.
-pub fn iter_vertices_dfs(dag: &DirectedAcyclicGraph) -> DfsVerticesIterator {
-    DfsVerticesIterator {
-        dag,
-        visited: FixedBitSet::with_capacity(dag.get_vertex_count()),
-        to_visit: get_vertices_without_incoming_edges(dag),
-    }
-}
 
 /// See [`iter_vertices_dfs_post_order`].
-
 pub struct DfsPostOrderVerticesIterator<'a> {
     dag: &'a DirectedAcyclicGraph,
     visited: FixedBitSet,
@@ -450,30 +569,6 @@ impl<'a> Iterator for DfsPostOrderVerticesIterator<'a> {
     }
 }
 
-/// Visit all vertices reachable from `vertex` in a depth-first-search
-/// postorder, i.e. emitting vertices only after all their descendants have been
-/// emitted first.
-pub fn iter_descendants_dfs_post_order(
-    dag: &DirectedAcyclicGraph,
-    vertex: usize,
-) -> DfsPostOrderVerticesIterator {
-    DfsPostOrderVerticesIterator {
-        dag,
-        visited: FixedBitSet::with_capacity(dag.get_vertex_count()),
-        to_visit: vec![vertex],
-    }
-}
-
-/// Visit all vertices of a DAG in a depth-first-search postorder, i.e. emitting
-/// vertices only after all their descendants have been emitted first.
-pub fn iter_vertices_dfs_post_order(dag: &DirectedAcyclicGraph) -> DfsPostOrderVerticesIterator {
-    DfsPostOrderVerticesIterator {
-        dag,
-        visited: FixedBitSet::with_capacity(dag.get_vertex_count()),
-        to_visit: get_vertices_without_incoming_edges(dag),
-    }
-}
-
 /// See [`iter_edges_dfs_post_order`].
 pub struct DfsPostOrderEdgesIterator<'a> {
     dag: &'a DirectedAcyclicGraph,
@@ -501,33 +596,6 @@ impl<'a> Iterator for DfsPostOrderEdgesIterator<'a> {
             self.seen_vertices.set(u, true);
         }
     }
-}
-
-/// Visit nodes in a depth-first-search (DFS) emitting edges in postorder, i.e.
-/// each node after all its descendants have been emitted.
-///
-/// Note that when a DAG represents a [partially ordered
-/// set](https://en.wikipedia.org/wiki/Partially_ordered_set), this function iterates over pairs of
-/// that poset.  It may be necessary to first compute either a [`crate::transitive_reduction`] of a
-/// DAG, to only get the minimal set of pairs spanning the entire poset, or a
-/// [`crate::transitive_closure`] to get all the pairs of that poset.
-pub fn iter_edges_dfs_post_order(dag: &DirectedAcyclicGraph) -> DfsPostOrderEdgesIterator {
-    DfsPostOrderEdgesIterator {
-        dag,
-        inner: iter_vertices_dfs_post_order(dag),
-        seen_vertices: FixedBitSet::with_capacity(dag.get_vertex_count()),
-        buffer: Default::default(),
-    }
-}
-
-/// Combines [`iter_vertices_dfs_post_order`], [`Iterator::collect()`] and
-/// [`slice::reverse()`] to get a topologically ordered sequence of vertices of a
-/// DAG.
-pub fn get_topologically_ordered_vertices(dag: &DirectedAcyclicGraph) -> Vec<usize> {
-    let mut result: Vec<usize> = Vec::with_capacity(dag.get_vertex_count());
-    result.extend(iter_vertices_dfs_post_order(dag));
-    result.reverse();
-    result
 }
 
 #[cfg(test)]
@@ -575,10 +643,10 @@ mod tests {
         ];
         let dag =
             DirectedAcyclicGraph::from_edges_iter(12 + 1, divisibility_poset_pairs.into_iter());
-        let dag = transitive_reduction(&dag);
+        let dag = dag.transitive_reduction();
 
         let dag_pairs: HashSet<(usize, usize)> =
-            HashSet::from_iter(iter_edges_dfs_post_order(&dag));
+            HashSet::from_iter(dag.iter_edges_dfs_post_order());
         let expected = HashSet::from_iter(vec![
             (3, 9),
             (2, 6),
@@ -793,7 +861,7 @@ mod tests {
         ];
         let dag =
             DirectedAcyclicGraph::from_edges_iter(12 + 1, divisibility_poset_pairs.into_iter());
-        let descendants = get_descendants(&dag);
+        let descendants = dag.get_descendants();
         assert_eq!(descendants[12], FixedBitSet::from_iter(vec![]));
         assert_eq!(descendants[11], FixedBitSet::from_iter(vec![]));
         assert_eq!(descendants[10], FixedBitSet::from_iter(vec![]));
@@ -822,9 +890,9 @@ mod tests {
     ) -> bool {
         println!("{:?}", dag);
         let transitive_closure: HashSet<(usize, usize)> =
-            transitive_closure(&dag).iter_edges().collect();
+            dag.transitive_closure().iter_edges().collect();
         let transitive_reduction: HashSet<(usize, usize)> =
-            transitive_reduction(&dag).iter_edges().collect();
+            dag.transitive_reduction().iter_edges().collect();
         let intersection: HashSet<(usize, usize)> = transitive_closure
             .intersection(&transitive_reduction)
             .cloned()
@@ -869,23 +937,23 @@ mod tests {
             DirectedAcyclicGraph::from_edges_iter(12 + 1, divisibility_poset_pairs.into_iter());
 
         assert_eq!(
-            iter_descendants_dfs(&dag, 12).collect::<Vec<usize>>(),
+            dag.iter_descendants_dfs(12).collect::<Vec<usize>>(),
             vec![12]
         );
         assert_eq!(
-            iter_descendants_dfs(&dag, 11).collect::<Vec<usize>>(),
+            dag.iter_descendants_dfs(11).collect::<Vec<usize>>(),
             vec![11]
         );
         assert_eq!(
-            iter_descendants_dfs(&dag, 6).collect::<Vec<usize>>(),
+            dag.iter_descendants_dfs(6).collect::<Vec<usize>>(),
             vec![6, 12]
         );
     }
 
     fn prop_traversals_equal_modulo_order(dag: DirectedAcyclicGraph) {
-        let bfs: HashSet<usize> = iter_vertices_bfs(&dag).collect();
-        let dfs: HashSet<usize> = iter_vertices_dfs(&dag).collect();
-        let dfs_post_order: HashSet<usize> = iter_vertices_dfs_post_order(&dag).collect();
+        let bfs: HashSet<usize> = dag.iter_vertices_bfs().collect();
+        let dfs: HashSet<usize> = dag.iter_vertices_dfs().collect();
+        let dfs_post_order: HashSet<usize> = dag.iter_vertices_dfs_post_order().collect();
         assert_eq!(bfs, dfs);
         assert_eq!(dfs_post_order, dfs);
         assert_eq!(dfs_post_order, bfs);

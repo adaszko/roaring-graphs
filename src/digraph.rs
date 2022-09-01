@@ -1,3 +1,6 @@
+/// Unlike with [`DirectedAcyclicGraph`] data type, it is *not* the case that edges go from smaller
+/// integers to biggers!
+
 use std::io::Write;
 
 use proptest::prelude::*;
@@ -159,6 +162,7 @@ pub fn random_tree_from_prufer_sequence(prufer_sequence: &[usize]) -> DirectedGr
 }
 
 pub fn arb_tree(max_vertex_count: usize) -> BoxedStrategy<DirectedGraph> {
+    // TODO Union the strategy with manually-created base cases: empty graph, single-node graph.
     (2..max_vertex_count)
         .prop_flat_map(|vertex_count| {
             arb_prufer_sequence(vertex_count).prop_flat_map(move |prufer_sequence| {

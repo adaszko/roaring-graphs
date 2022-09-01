@@ -1,6 +1,6 @@
 use fixedbitset::FixedBitSet;
 
-const fn strictly_upper_triangular_matrix_capacity(n: usize) -> usize {
+pub const fn strictly_upper_triangular_matrix_capacity(n: usize) -> usize {
     (n * n - n) / 2
 }
 
@@ -66,6 +66,14 @@ impl StrictlyUpperTriangularLogicalMatrix {
         Self {
             size,
             matrix: FixedBitSet::with_capacity(capacity),
+        }
+    }
+
+    pub fn from_bitset(size: usize, bitset: FixedBitSet) -> Self {
+        assert_eq!(bitset.len(), strictly_upper_triangular_matrix_capacity(size));
+        Self {
+            size,
+            matrix: bitset,
         }
     }
 
