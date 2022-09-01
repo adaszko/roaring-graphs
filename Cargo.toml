@@ -1,9 +1,9 @@
 [package]
 name = "dograph"
-version = "0.8.4"
+version = "0.10.0"
 edition = "2021"
 authors = ["Adam Szkoda <adaszko@gmail.com>"]
-description = "Directed Acyclic Graphs with integer vertices represented as a Strictly Upper Triangular Matrix stored in a bit set"
+description = "Generate various classes of random graphs for use in property-based testing"
 homepage = "https://github.com/adaszko/dograph"
 repository = "https://github.com/adaszko/dograph"
 keywords = ["dag", "graph"]
