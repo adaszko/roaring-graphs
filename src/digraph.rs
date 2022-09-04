@@ -1,7 +1,7 @@
 /// Unlike with [`DirectedAcyclicGraph`] data type, it is *not* the case that edges go from smaller
 /// integers to biggers!
 
-use std::io::Write;
+use std::{io::Write, collections::VecDeque};
 
 use proptest::prelude::*;
 use fixedbitset::FixedBitSet;
@@ -79,6 +79,78 @@ impl DirectedGraph {
                 parents.push(u);
             }
         }
+    }
+
+    /// Visit all vertices reachable from `vertex` in a depth-first-search (DFS)
+    /// order.
+    pub fn iter_descendants_dfs(&self, start_vertex: usize) -> Box<dyn Iterator<Item=usize> + '_> {
+        let iter = DfsDescendantsIterator {
+            digraph: self,
+            visited: FixedBitSet::with_capacity(self.get_vertex_count()),
+            to_visit: vec![start_vertex],
+        };
+        let iter = iter.filter(move |vertex| *vertex != start_vertex);
+        Box::new(iter)
+    }
+
+    pub fn iter_ancestors_dfs(&self, start_vertex: usize) -> Box<dyn Iterator<Item=usize> + '_> {
+        let iter = DfsAncestorsIterator {
+            digraph: self,
+            visited: FixedBitSet::with_capacity(self.get_vertex_count()),
+            to_visit: vec![start_vertex],
+        };
+        let iter = iter.filter(move |vertex| *vertex != start_vertex);
+        Box::new(iter)
+    }
+
+    /// Returns a set "seed" vertices of a DAG from which a traversal may start so
+    /// that the process covers all vertices in the graph.
+    pub fn get_vertices_without_incoming_edges(&self) -> Vec<usize> {
+        let incoming_edges_count = {
+            let mut incoming_edges_count: Vec<usize> = vec![0; self.get_vertex_count()];
+            for (_, v) in self.iter_edges() {
+                incoming_edges_count[v] += 1;
+            }
+            incoming_edges_count
+        };
+
+        let vertices_without_incoming_edges: Vec<usize> = incoming_edges_count
+            .into_iter()
+            .enumerate()
+            .filter(|(_, indegree)| *indegree == 0)
+            .map(|(vertex, _)| vertex)
+            .collect();
+
+        vertices_without_incoming_edges
+    }
+
+    /// Visit all vertices of a DAG in a depth-first-search postorder, i.e. emitting
+    /// vertices only after all their descendants have been emitted first.
+    pub fn iter_vertices_dfs_post_order(&self) -> Box<dyn Iterator<Item=usize> + '_> {
+        let iter = DfsPostOrderVerticesIterator {
+            digraph: self,
+            visited: FixedBitSet::with_capacity(self.get_vertex_count()),
+            to_visit: self.get_vertices_without_incoming_edges(),
+        };
+        Box::new(iter)
+    }
+
+    /// Visit nodes in a depth-first-search (DFS) emitting edges in postorder, i.e.
+    /// each node after all its descendants have been emitted.
+    ///
+    /// Note that when a DAG represents a [partially ordered
+    /// set](https://en.wikipedia.org/wiki/Partially_ordered_set), this function iterates over pairs of
+    /// that poset.  It may be necessary to first compute either a [`crate::transitive_reduction`] of a
+    /// DAG, to only get the minimal set of pairs spanning the entire poset, or a
+    /// [`crate::transitive_closure`] to get all the pairs of that poset.
+    pub fn iter_edges_dfs_post_order(&self) -> Box<dyn Iterator<Item=(usize, usize)> + '_> {
+        let iter = DfsPostOrderEdgesIterator {
+            digraph: self,
+            inner: self.iter_vertices_dfs_post_order(),
+            seen_vertices: FixedBitSet::with_capacity(self.get_vertex_count()),
+            buffer: Default::default(),
+        };
+        Box::new(iter)
     }
 
     /// Outputs the DAG in the [Graphviz DOT](https://graphviz.org/) format.
@@ -175,13 +247,13 @@ pub fn arb_tree(max_vertex_count: usize) -> BoxedStrategy<DirectedGraph> {
 
 
 /// See [`iter_vertices_dfs`].
-pub struct DfsVerticesIterator<'a> {
+pub struct DfsDescendantsIterator<'a> {
     digraph: &'a DirectedGraph,
     visited: FixedBitSet,
     to_visit: Vec<usize>,
 }
 
-impl<'a> Iterator for DfsVerticesIterator<'a> {
+impl<'a> Iterator for DfsDescendantsIterator<'a> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -194,16 +266,6 @@ impl<'a> Iterator for DfsVerticesIterator<'a> {
             return Some(u);
         }
         None
-    }
-}
-
-/// Visit all vertices reachable from `vertex` in a depth-first-search (DFS)
-/// order.
-pub fn iter_descendants_dfs(digraph: &DirectedGraph, vertex: usize) -> DfsVerticesIterator {
-    DfsVerticesIterator {
-        digraph,
-        visited: FixedBitSet::with_capacity(digraph.get_vertex_count()),
-        to_visit: vec![vertex],
     }
 }
 
@@ -230,13 +292,76 @@ impl<'a> Iterator for DfsAncestorsIterator<'a> {
 }
 
 
-pub fn iter_ancestors_dfs(digraph: &DirectedGraph, vertex: usize) -> DfsAncestorsIterator {
-    DfsAncestorsIterator {
-        digraph,
-        visited: FixedBitSet::with_capacity(digraph.get_vertex_count()),
-        to_visit: vec![vertex],
+/// See [`iter_vertices_dfs_post_order`].
+pub struct DfsPostOrderVerticesIterator<'a> {
+    digraph: &'a DirectedGraph,
+    visited: FixedBitSet,
+    to_visit: Vec<usize>,
+}
+
+impl<'a> Iterator for DfsPostOrderVerticesIterator<'a> {
+    type Item = usize;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            let u = match self.to_visit.last().copied() {
+                Some(u) => u,
+                None => return None,
+            };
+            if self.visited[u] {
+                self.to_visit.pop();
+                continue;
+            }
+            let unvisited_neighbours: Vec<usize> = {
+                let mut neighbours: Vec<usize> = Default::default();
+                self.digraph.extend_with_children(&mut neighbours, u);
+                neighbours.retain(|v| !self.visited[*v]);
+                neighbours
+            };
+            if unvisited_neighbours.is_empty() {
+                // We have visited all the descendants of u.  We can now emit u
+                // from the iterator.
+                self.to_visit.pop();
+                self.visited.set(u, true);
+                return Some(u);
+            }
+            self.to_visit.extend(unvisited_neighbours);
+        }
     }
 }
+
+
+/// See [`iter_edges_dfs_post_order`].
+pub struct DfsPostOrderEdgesIterator<'a> {
+    digraph: &'a DirectedGraph,
+    inner: Box<dyn Iterator<Item=usize> + 'a>,
+    seen_vertices: FixedBitSet,
+    buffer: VecDeque<(usize, usize)>,
+}
+
+impl<'a> Iterator for DfsPostOrderEdgesIterator<'a> {
+    type Item = (usize, usize);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if let Some((u, v)) = self.buffer.pop_front() {
+                return Some((u, v));
+            }
+
+            let u = self.inner.next()?;
+
+            let mut children: Vec<usize> = Default::default();
+            self.digraph.extend_with_children(&mut children, u);
+            for v in children {
+                if self.seen_vertices[v] {
+                    self.buffer.push_back((u, v));
+                }
+            }
+            self.seen_vertices.set(u, true);
+        }
+    }
+}
+
 
 #[cfg(test)]
 mod tests {
