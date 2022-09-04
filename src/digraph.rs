@@ -6,10 +6,22 @@ use std::{io::Write, collections::VecDeque};
 use proptest::prelude::*;
 use fixedbitset::FixedBitSet;
 
+use crate::TraversableDirectedGraph;
+
 #[derive(Clone, Debug)]
 pub struct DirectedGraph {
     vertex_count: usize,
     adjacency_matrix: FixedBitSet,
+}
+
+impl TraversableDirectedGraph for DirectedGraph {
+    fn extend_with_children(&self, children: &mut Vec<usize>, u: usize) {
+        self.extend_with_children(children, u)
+    }
+
+    fn extend_with_parents(&self, parents: &mut Vec<usize>, v: usize) {
+        self.extend_with_parents(parents, v)
+    }
 }
 
 impl DirectedGraph {
@@ -247,13 +259,13 @@ pub fn arb_tree(max_vertex_count: usize) -> BoxedStrategy<DirectedGraph> {
 
 
 /// See [`iter_vertices_dfs`].
-pub struct DfsDescendantsIterator<'a> {
-    digraph: &'a DirectedGraph,
-    visited: FixedBitSet,
-    to_visit: Vec<usize>,
+pub(crate) struct DfsDescendantsIterator<'a, G: TraversableDirectedGraph> {
+    pub(crate) digraph: &'a G,
+    pub(crate) visited: FixedBitSet,
+    pub(crate) to_visit: Vec<usize>,
 }
 
-impl<'a> Iterator for DfsDescendantsIterator<'a> {
+impl<'a, G: TraversableDirectedGraph> Iterator for DfsDescendantsIterator<'a, G> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -269,13 +281,13 @@ impl<'a> Iterator for DfsDescendantsIterator<'a> {
     }
 }
 
-pub struct DfsAncestorsIterator<'a> {
-    digraph: &'a DirectedGraph,
-    visited: FixedBitSet,
-    to_visit: Vec<usize>,
+pub(crate) struct DfsAncestorsIterator<'a, G: TraversableDirectedGraph> {
+    pub(crate) digraph: &'a G,
+    pub(crate) visited: FixedBitSet,
+    pub(crate) to_visit: Vec<usize>,
 }
 
-impl<'a> Iterator for DfsAncestorsIterator<'a> {
+impl<'a, G: TraversableDirectedGraph> Iterator for DfsAncestorsIterator<'a, G> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -293,13 +305,13 @@ impl<'a> Iterator for DfsAncestorsIterator<'a> {
 
 
 /// See [`iter_vertices_dfs_post_order`].
-pub struct DfsPostOrderVerticesIterator<'a> {
-    digraph: &'a DirectedGraph,
-    visited: FixedBitSet,
-    to_visit: Vec<usize>,
+pub(crate) struct DfsPostOrderVerticesIterator<'a, G: TraversableDirectedGraph> {
+    pub(crate) digraph: &'a G,
+    pub(crate) visited: FixedBitSet,
+    pub(crate) to_visit: Vec<usize>,
 }
 
-impl<'a> Iterator for DfsPostOrderVerticesIterator<'a> {
+impl<'a, G: TraversableDirectedGraph> Iterator for DfsPostOrderVerticesIterator<'a, G> {
     type Item = usize;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -332,14 +344,14 @@ impl<'a> Iterator for DfsPostOrderVerticesIterator<'a> {
 
 
 /// See [`iter_edges_dfs_post_order`].
-pub struct DfsPostOrderEdgesIterator<'a> {
-    digraph: &'a DirectedGraph,
-    inner: Box<dyn Iterator<Item=usize> + 'a>,
-    seen_vertices: FixedBitSet,
-    buffer: VecDeque<(usize, usize)>,
+pub(crate) struct DfsPostOrderEdgesIterator<'a, G: TraversableDirectedGraph> {
+    pub(crate) digraph: &'a G,
+    pub(crate) inner: Box<dyn Iterator<Item=usize> + 'a>,
+    pub(crate) seen_vertices: FixedBitSet,
+    pub(crate) buffer: VecDeque<(usize, usize)>,
 }
 
-impl<'a> Iterator for DfsPostOrderEdgesIterator<'a> {
+impl<'a, G: TraversableDirectedGraph> Iterator for DfsPostOrderEdgesIterator<'a, G> {
     type Item = (usize, usize);
 
     fn next(&mut self) -> Option<Self::Item> {
