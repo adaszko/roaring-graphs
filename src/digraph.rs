@@ -1,12 +1,11 @@
 /// Unlike with [`DirectedAcyclicGraph`] data type, it is *not* the case that edges go from smaller
-/// integers to biggers!
+/// integers to bigger!
+use std::{collections::VecDeque, io::Write};
 
-use std::{io::Write, collections::VecDeque};
-
-use proptest::prelude::*;
 use fixedbitset::FixedBitSet;
+use proptest::prelude::*;
 
-use crate::TraversableDirectedGraph;
+use crate::{TraversableDirectedGraph, dag::DirectedAcyclicGraph};
 
 #[derive(Clone, Debug)]
 pub struct DirectedGraph {
@@ -24,12 +23,35 @@ impl TraversableDirectedGraph for DirectedGraph {
     }
 }
 
+fn unchecked_get_index_from_row_column(i: usize, j: usize, size: usize) -> usize {
+    i * size + j
+}
+
 impl DirectedGraph {
     pub fn empty(vertex_count: usize) -> Self {
         Self {
             vertex_count,
             adjacency_matrix: FixedBitSet::with_capacity(vertex_count * vertex_count),
         }
+    }
+
+    pub fn from_edges_iter<I>(vertex_count: usize, edges: I) -> Self
+    where
+        I: Iterator<Item = (usize, usize)>,
+    {
+        let mut adjacency_matrix = FixedBitSet::with_capacity(vertex_count * vertex_count);
+        for (from, to) in edges {
+            let index = unchecked_get_index_from_row_column(from, to, vertex_count);
+            adjacency_matrix.set(index, true);
+        }
+        Self {
+            vertex_count,
+            adjacency_matrix,
+        }
+    }
+
+    pub fn from_dag(dag: &DirectedAcyclicGraph) -> Self {
+        Self::from_edges_iter(dag.get_vertex_count(), dag.iter_edges())
     }
 
     pub fn get_vertex_count(&self) -> usize {
@@ -39,7 +61,7 @@ impl DirectedGraph {
     fn index_from_row_column(&self, i: usize, j: usize) -> usize {
         assert!(i < self.vertex_count);
         assert!(j < self.vertex_count);
-        i * self.vertex_count + j
+        unchecked_get_index_from_row_column(i, j, self.vertex_count)
     }
 
     /// Iterates over the edges in an order that favors CPU cache locality.
@@ -93,9 +115,59 @@ impl DirectedGraph {
         }
     }
 
+    pub fn has_cycle(&self) -> bool {
+        let mut starting_vertices = self.get_vertices_without_incoming_edges();
+        if starting_vertices.is_empty() && self.iter_edges().next().is_some() {
+            // If there are no vertices without incoming edges and yet there are some edges the
+            // graph, we have a highly cyclic graph.
+            cov_mark::hit!(nonempty_graph_without_starting_vertices_graph_is_cyclic);
+            return true;
+        }
+
+        enum VisitStep {
+            VertexChild(usize),
+            OutOfVertexChildren, // this marker is used as an indicator when to pop from the visitation stack
+        }
+
+        let mut visited = FixedBitSet::with_capacity(self.vertex_count);
+        while let Some(starting_vertex) = starting_vertices.pop() {
+            let mut to_visit: Vec<VisitStep> = vec![VisitStep::VertexChild(starting_vertex)];
+            let mut path: Vec<usize> = Default::default();
+            while let Some(vertex) = to_visit.pop() {
+                match vertex {
+                    VisitStep::VertexChild(vertex) => {
+                        if path.contains(&vertex) {
+                            // We have a cycle
+                            return true;
+                        }
+                        if visited.contains(vertex) {
+                            // We have something homeomorphic to a diamond
+                            continue;
+                        }
+                        path.push(vertex);
+                        to_visit.push(VisitStep::OutOfVertexChildren);
+                        let mut children: Vec<usize> = Default::default();
+                        self.extend_with_children(&mut children, vertex);
+                        for child in children {
+                            to_visit.push(VisitStep::VertexChild(child));
+                        }
+                        visited.set(vertex, true);
+                    }
+                    VisitStep::OutOfVertexChildren => {
+                        path.pop().unwrap();
+                    }
+                };
+            }
+        }
+        false
+    }
+
     /// Visit all vertices reachable from `vertex` in a depth-first-search (DFS)
     /// order.
-    pub fn iter_descendants_dfs(&self, start_vertex: usize) -> Box<dyn Iterator<Item=usize> + '_> {
+    pub fn iter_descendants_dfs(
+        &self,
+        start_vertex: usize,
+    ) -> Box<dyn Iterator<Item = usize> + '_> {
         let iter = DfsDescendantsIterator {
             digraph: self,
             visited: FixedBitSet::with_capacity(self.get_vertex_count()),
@@ -105,7 +177,7 @@ impl DirectedGraph {
         Box::new(iter)
     }
 
-    pub fn iter_ancestors_dfs(&self, start_vertex: usize) -> Box<dyn Iterator<Item=usize> + '_> {
+    pub fn iter_ancestors_dfs(&self, start_vertex: usize) -> Box<dyn Iterator<Item = usize> + '_> {
         let iter = DfsAncestorsIterator {
             digraph: self,
             visited: FixedBitSet::with_capacity(self.get_vertex_count()),
@@ -138,7 +210,7 @@ impl DirectedGraph {
 
     /// Visit all vertices of a DAG in a depth-first-search postorder, i.e. emitting
     /// vertices only after all their descendants have been emitted first.
-    pub fn iter_vertices_dfs_post_order(&self) -> Box<dyn Iterator<Item=usize> + '_> {
+    pub fn iter_vertices_dfs_post_order(&self) -> Box<dyn Iterator<Item = usize> + '_> {
         let iter = DfsPostOrderVerticesIterator {
             digraph: self,
             visited: FixedBitSet::with_capacity(self.get_vertex_count()),
@@ -155,7 +227,7 @@ impl DirectedGraph {
     /// that poset.  It may be necessary to first compute either a [`crate::transitive_reduction`] of a
     /// DAG, to only get the minimal set of pairs spanning the entire poset, or a
     /// [`crate::transitive_closure`] to get all the pairs of that poset.
-    pub fn iter_edges_dfs_post_order(&self) -> Box<dyn Iterator<Item=(usize, usize)> + '_> {
+    pub fn iter_edges_dfs_post_order(&self) -> Box<dyn Iterator<Item = (usize, usize)> + '_> {
         let iter = DfsPostOrderEdgesIterator {
             digraph: self,
             inner: self.iter_vertices_dfs_post_order(),
@@ -257,7 +329,6 @@ pub fn arb_tree(max_vertex_count: usize) -> BoxedStrategy<DirectedGraph> {
         .boxed()
 }
 
-
 /// See [`iter_vertices_dfs`].
 pub(crate) struct DfsDescendantsIterator<'a, G: TraversableDirectedGraph> {
     pub(crate) digraph: &'a G,
@@ -303,7 +374,6 @@ impl<'a, G: TraversableDirectedGraph> Iterator for DfsAncestorsIterator<'a, G> {
     }
 }
 
-
 /// See [`iter_vertices_dfs_post_order`].
 pub(crate) struct DfsPostOrderVerticesIterator<'a, G: TraversableDirectedGraph> {
     pub(crate) digraph: &'a G,
@@ -342,11 +412,10 @@ impl<'a, G: TraversableDirectedGraph> Iterator for DfsPostOrderVerticesIterator<
     }
 }
 
-
 /// See [`iter_edges_dfs_post_order`].
 pub(crate) struct DfsPostOrderEdgesIterator<'a, G: TraversableDirectedGraph> {
     pub(crate) digraph: &'a G,
-    pub(crate) inner: Box<dyn Iterator<Item=usize> + 'a>,
+    pub(crate) inner: Box<dyn Iterator<Item = usize> + 'a>,
     pub(crate) seen_vertices: FixedBitSet,
     pub(crate) buffer: VecDeque<(usize, usize)>,
 }
@@ -374,15 +443,53 @@ impl<'a, G: TraversableDirectedGraph> Iterator for DfsPostOrderEdgesIterator<'a,
     }
 }
 
-
 #[cfg(test)]
 mod tests {
+    use crate::dag::arb_dag;
+
     use super::*;
+
+    #[test]
+    fn empty_graph_has_no_cycle() {
+        let digraph = DirectedGraph::from_edges_iter(1, vec![].into_iter());
+        assert!(!digraph.has_cycle());
+    }
+
+    #[test]
+    fn diamond_has_no_cycle() {
+        let diamond =
+            DirectedGraph::from_edges_iter(4, vec![(0, 1), (0, 2), (1, 3), (2, 3)].into_iter());
+        assert!(!diamond.has_cycle());
+    }
+
+    #[test]
+    fn simple_cyclic_digraph_has_cycle() {
+        let digraph = DirectedGraph::from_edges_iter(2, vec![(0, 1), (1, 0)].into_iter());
+        cov_mark::check!(nonempty_graph_without_starting_vertices_graph_is_cyclic);
+        assert!(digraph.has_cycle());
+    }
+
+    #[test]
+    fn triangle_has_cycle() {
+        let digraph = DirectedGraph::from_edges_iter(3, vec![(0, 1), (1, 2), (2, 0)].into_iter());
+        assert!(digraph.has_cycle());
+    }
 
     proptest! {
         #[test]
         fn arb_tree_has_exactly_one_root(tree in arb_tree(100)) {
             prop_assert!(tree.find_tree_root().is_some());
+        }
+
+        #[test]
+        fn arb_tree_has_no_cycle(tree in arb_tree(100)) {
+            prop_assert!(!tree.has_cycle());
+        }
+
+        #[test]
+        fn arb_dag_has_no_cycle(dag in arb_dag(100)) {
+            let digraph = DirectedGraph::from_dag(&dag);
+            prop_assert!(!digraph.has_cycle());
         }
     }
 }

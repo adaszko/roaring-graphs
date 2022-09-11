@@ -208,21 +208,23 @@ impl DirectedAcyclicGraph {
 
     /// Visit all vertices reachable from `vertex` in a depth-first-search (DFS)
     /// order.
-    pub fn iter_descendants_dfs(&self, vertex: usize) -> Box<dyn Iterator<Item=usize> + '_> {
+    pub fn iter_descendants_dfs(&self, start_vertex: usize) -> Box<dyn Iterator<Item=usize> + '_> {
         let iter = crate::digraph::DfsDescendantsIterator {
             digraph: self,
             visited: FixedBitSet::with_capacity(self.get_vertex_count()),
-            to_visit: vec![vertex],
+            to_visit: vec![start_vertex],
         };
+        let iter = iter.filter(move |vertex| *vertex != start_vertex);
         Box::new(iter)
     }
 
-    pub fn iter_ancestors_dfs(&self, vertex: usize) -> Box<dyn Iterator<Item=usize> + '_> {
+    pub fn iter_ancestors_dfs(&self, start_vertex: usize) -> Box<dyn Iterator<Item=usize> + '_> {
         let iter = crate::digraph::DfsAncestorsIterator {
             digraph: self,
             visited: FixedBitSet::with_capacity(self.get_vertex_count()),
-            to_visit: vec![vertex],
+            to_visit: vec![start_vertex],
         };
+        let iter = iter.filter(move |vertex| *vertex != start_vertex);
         Box::new(iter)
     }
 
