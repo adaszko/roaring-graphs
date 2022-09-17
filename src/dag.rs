@@ -73,7 +73,7 @@ impl std::fmt::Debug for DirectedAcyclicGraph {
         let ones: Vec<(usize, usize)> = self.iter_edges().collect();
         write!(
             f,
-            "DirectedAcyclicGraph::from_edges({}, vec!{:?}.iter().cloned())",
+            "DirectedAcyclicGraph::from_edges_iter({}, vec!{:?}.iter().cloned())",
             self.get_vertex_count(),
             ones
         )?;
@@ -250,7 +250,7 @@ impl DirectedAcyclicGraph {
     }
 
     /// Visit nodes in a depth-first-search (DFS) emitting edges in postorder, i.e.
-    /// each node after all its descendants have been emitted.
+    /// each node is visited after all its descendants have been already visited.
     ///
     /// Note that when a DAG represents a [partially ordered
     /// set](https://en.wikipedia.org/wiki/Partially_ordered_set), this function iterates over pairs of
@@ -401,6 +401,15 @@ impl DirectedAcyclicGraph {
         }
 
         writeln!(output, "}}")?;
+        Ok(())
+    }
+
+    pub fn to_dot_file<P: AsRef<std::path::Path>>(
+        &self,
+        path: P,
+    ) -> std::result::Result<(), std::io::Error> {
+        let mut file = std::fs::File::create(path)?;
+        self.to_dot(&mut file)?;
         Ok(())
     }
 }

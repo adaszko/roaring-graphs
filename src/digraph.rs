@@ -7,10 +7,23 @@ use proptest::prelude::*;
 
 use crate::{TraversableDirectedGraph, dag::DirectedAcyclicGraph};
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct DirectedGraph {
     vertex_count: usize,
     adjacency_matrix: FixedBitSet,
+}
+
+impl std::fmt::Debug for DirectedGraph {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let ones: Vec<(usize, usize)> = self.iter_edges().collect();
+        write!(
+            f,
+            "DirectedGraph::from_edges_iter({}, vec!{:?}.iter().cloned())",
+            self.get_vertex_count(),
+            ones
+        )?;
+        Ok(())
+    }
 }
 
 impl TraversableDirectedGraph for DirectedGraph {
@@ -71,6 +84,14 @@ impl DirectedGraph {
             let column = index % self.vertex_count;
             (row, column)
         })
+    }
+
+    pub fn get_edge(&self, parent: usize, child: usize) -> bool {
+        assert_ne!(parent, child);
+        assert!(parent < self.get_vertex_count());
+        assert!(child < self.get_vertex_count());
+        let index = self.index_from_row_column(parent, child);
+        self.adjacency_matrix[index]
     }
 
     pub fn set_edge(&mut self, parent: usize, child: usize, exists: bool) {
@@ -206,6 +227,48 @@ impl DirectedGraph {
             .collect();
 
         vertices_without_incoming_edges
+    }
+
+    /// Computes a mapping: vertex -> set of vertices that are descendants of vertex.
+    pub fn get_descendants(&self) -> Vec<FixedBitSet> {
+        let mut descendants: Vec<FixedBitSet> = vec![FixedBitSet::default(); self.get_vertex_count()];
+
+        let mut children = Vec::with_capacity(self.get_vertex_count());
+        for u in (0..self.get_vertex_count()).rev() {
+            children.clear();
+            self.extend_with_children(&mut children, u);
+            let mut u_descendants = FixedBitSet::default();
+            for &v in &children {
+                u_descendants.union_with(&descendants[v]);
+                u_descendants.grow(v + 1);
+                u_descendants.set(v, true);
+            }
+            descendants[u] = u_descendants;
+        }
+
+        descendants
+    }
+
+    /// Returns a new DAG that is a [transitive
+    /// reduction](https://en.wikipedia.org/wiki/Transitive_reduction) of a DAG.
+    pub fn transitive_reduction(&self) -> DirectedGraph {
+        let mut result = self.clone();
+
+        let mut children = Vec::with_capacity(self.get_vertex_count());
+        let descendants = self.get_descendants();
+        for u in 0..self.get_vertex_count() {
+            children.clear();
+            self.extend_with_children(&mut children, u);
+            for &v in &children {
+                for w in descendants[v].ones() {
+                    if w == v {
+                        continue;
+                    }
+                    result.set_edge(u, w, false);
+                }
+            }
+        }
+        result
     }
 
     /// Visit all vertices of a DAG in a depth-first-search postorder, i.e. emitting
