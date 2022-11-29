@@ -1,18 +1,18 @@
-use fixedbitset::FixedBitSet;
+use roaring::RoaringBitmap;
 
-pub const fn strictly_upper_triangular_matrix_capacity(n: usize) -> usize {
+pub const fn strictly_upper_triangular_matrix_capacity(n: u32) -> u32 {
     (n * n - n) / 2
 }
 
 pub struct CacheFriendlyMatrixIterator {
-    size: usize,
-    i: usize,
-    j: usize,
-    index: usize,
+    size: u32,
+    i: u32,
+    j: u32,
+    index: u32,
 }
 
 impl<'a> Iterator for CacheFriendlyMatrixIterator {
-    type Item = (usize, usize, usize); // (i, j, bitset index)
+    type Item = (u32, u32, u32); // (i, j, bitset index)
 
     fn next(&mut self) -> Option<Self::Item> {
         let result = (self.i, self.j, self.index);
@@ -31,7 +31,7 @@ impl<'a> Iterator for CacheFriendlyMatrixIterator {
     }
 }
 
-pub fn iter_matrix_starting_at(i: usize, size: usize) -> CacheFriendlyMatrixIterator {
+pub fn iter_matrix_starting_at(i: u32, size: u32) -> CacheFriendlyMatrixIterator {
     let j = i + 1;
     let index = unchecked_get_index_from_row_column(i, j, size);
     CacheFriendlyMatrixIterator { size, i, j, index }
@@ -40,7 +40,7 @@ pub fn iter_matrix_starting_at(i: usize, size: usize) -> CacheFriendlyMatrixIter
 /// Iterates over `(i, j)` pairs in an order that favors CPU cache locality.
 /// If your graph algorithm can process edges in an arbitrary order, it is
 /// recommended you use this iterator.
-pub fn iter_matrix(size: usize) -> CacheFriendlyMatrixIterator {
+pub fn iter_matrix(size: u32) -> CacheFriendlyMatrixIterator {
     iter_matrix_starting_at(0, size)
 }
 
@@ -49,35 +49,33 @@ pub fn iter_matrix(size: usize) -> CacheFriendlyMatrixIterator {
 /// matrix of booleans.
 #[derive(Clone, Debug)]
 pub struct StrictlyUpperTriangularLogicalMatrix {
-    size: usize,
-    matrix: FixedBitSet,
+    size: u32,
+    matrix: RoaringBitmap,
 }
 
 // Reference: https://www.intel.com/content/www/us/en/develop/documentation/onemkl-developer-reference-c/top/lapack-routines/matrix-storage-schemes-for-lapack-routines.html
 // Formulas adjusted for indexing from zero.
 #[inline]
-fn unchecked_get_index_from_row_column(i: usize, j: usize, size: usize) -> usize {
+fn unchecked_get_index_from_row_column(i: u32, j: u32, size: u32) -> u32 {
     ((2 * size - i - 1) * i) / 2 + j - i - 1
 }
 
 impl StrictlyUpperTriangularLogicalMatrix {
-    pub fn zeroed(size: usize) -> Self {
-        let capacity = strictly_upper_triangular_matrix_capacity(size);
+    pub fn zeroed(size: u32) -> Self {
         Self {
             size,
-            matrix: FixedBitSet::with_capacity(capacity),
+            matrix: RoaringBitmap::new(),
         }
     }
 
-    pub fn from_bitset(size: usize, bitset: FixedBitSet) -> Self {
-        assert_eq!(bitset.len(), strictly_upper_triangular_matrix_capacity(size));
+    pub fn from_bitset(size: u32, bitset: RoaringBitmap) -> Self {
         Self {
             size,
             matrix: bitset,
         }
     }
 
-    pub fn from_iter<I: Iterator<Item = (usize, usize)>>(size: usize, iter: I) -> Self {
+    pub fn from_iter<I: Iterator<Item = (u32, u32)>>(size: u32, iter: I) -> Self {
         let mut matrix = Self::zeroed(size);
         for (i, j) in iter {
             matrix.set(i, j, true);
@@ -86,34 +84,38 @@ impl StrictlyUpperTriangularLogicalMatrix {
     }
 
     #[inline]
-    pub fn size(&self) -> usize {
+    pub fn size(&self) -> u32 {
         self.size
     }
 
     #[inline]
-    fn index_from_row_column(&self, i: usize, j: usize) -> usize {
+    fn index_from_row_column(&self, i: u32, j: u32) -> u32 {
         assert!(i < self.size);
         assert!(j < self.size);
         assert!(i < j);
         unchecked_get_index_from_row_column(i, j, self.size)
     }
 
-    pub fn get(&self, i: usize, j: usize) -> bool {
+    pub fn get(&self, i: u32, j: u32) -> bool {
         let index = self.index_from_row_column(i, j);
-        self.matrix[index]
+        self.matrix.contains(index)
     }
 
     /// Returns the previous value.
-    pub fn set(&mut self, i: usize, j: usize, value: bool) -> bool {
+    pub fn set(&mut self, i: u32, j: u32, value: bool) -> bool {
         let index = self.index_from_row_column(i, j);
-        let current = self.matrix[index];
-        self.matrix.set(index, value);
+        let current = self.matrix.contains(index);
+        if value {
+            self.matrix.insert(index);
+        } else {
+            self.matrix.remove(index);
+        }
         current
     }
 
-    pub fn iter_ones(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
+    pub fn iter_ones(&self) -> impl Iterator<Item = (u32, u32)> + '_ {
         iter_matrix(self.size()).filter_map(move |(i, j, index)| {
-            if self.matrix[index] {
+            if self.matrix.contains(index) {
                 Some((i, j))
             } else {
                 None
@@ -121,11 +123,11 @@ impl StrictlyUpperTriangularLogicalMatrix {
         })
     }
 
-    pub fn iter_ones_at_row(&self, i: usize) -> impl Iterator<Item = usize> + '_ {
+    pub fn iter_ones_at_row(&self, i: u32) -> impl Iterator<Item = u32> + '_ {
         assert!(i < self.size());
         iter_matrix_starting_at(i, self.size())
             .take_while(move |(ii, _, _)| *ii == i)
-            .filter(move |(_, _, index)| self.matrix[*index])
+            .filter(move |(_, _, index)| self.matrix.contains(*index))
             .map(move |(_, jj, _)| jj)
     }
 }
@@ -138,11 +140,11 @@ mod tests {
     fn positive_test_3x3_matrix() {
         let mut matrix = StrictlyUpperTriangularLogicalMatrix::zeroed(3);
         assert_eq!(matrix.get(0, 1), false);
-        let ones: Vec<(usize, usize)> = matrix.iter_ones().collect();
+        let ones: Vec<(u32, u32)> = matrix.iter_ones().collect();
         assert_eq!(ones, vec![]);
 
         matrix.set(0, 1, true);
-        let ones: Vec<(usize, usize)> = matrix.iter_ones().collect();
+        let ones: Vec<(u32, u32)> = matrix.iter_ones().collect();
         assert_eq!(ones, vec![(0, 1)]);
     }
 
@@ -167,10 +169,10 @@ mod tests {
 
     #[test]
     fn test_matrix_iterator() {
-        let row_column_index: Vec<(usize, usize, usize)> = iter_matrix(3).collect();
+        let row_column_index: Vec<(u32, u32, u32)> = iter_matrix(3).collect();
         assert_eq!(row_column_index, vec![(0, 1, 0), (0, 2, 1), (1, 2, 2),]);
 
-        let row_column_index: Vec<(usize, usize, usize)> = iter_matrix(4).collect();
+        let row_column_index: Vec<(u32, u32, u32)> = iter_matrix(4).collect();
         assert_eq!(
             row_column_index,
             vec![

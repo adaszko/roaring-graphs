@@ -2,20 +2,20 @@
 /// integers to bigger!
 use std::{collections::VecDeque, io::Write};
 
-use fixedbitset::FixedBitSet;
+use roaring::RoaringBitmap;
 use proptest::prelude::*;
 
 use crate::{TraversableDirectedGraph, dag::DirectedAcyclicGraph};
 
 #[derive(Clone)]
 pub struct DirectedGraph {
-    vertex_count: usize,
-    adjacency_matrix: FixedBitSet,
+    vertex_count: u32,
+    adjacency_matrix: RoaringBitmap,
 }
 
 impl std::fmt::Debug for DirectedGraph {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let ones: Vec<(usize, usize)> = self.iter_edges().collect();
+        let ones: Vec<(u32, u32)> = self.iter_edges().collect();
         write!(
             f,
             "DirectedGraph::from_edges_iter({}, vec!{:?}.iter().cloned())",
@@ -27,35 +27,35 @@ impl std::fmt::Debug for DirectedGraph {
 }
 
 impl TraversableDirectedGraph for DirectedGraph {
-    fn extend_with_children(&self, children: &mut Vec<usize>, u: usize) {
+    fn extend_with_children(&self, children: &mut Vec<u32>, u: u32) {
         self.extend_with_children(children, u)
     }
 
-    fn extend_with_parents(&self, parents: &mut Vec<usize>, v: usize) {
+    fn extend_with_parents(&self, parents: &mut Vec<u32>, v: u32) {
         self.extend_with_parents(parents, v)
     }
 }
 
-fn unchecked_get_index_from_row_column(i: usize, j: usize, size: usize) -> usize {
+fn unchecked_get_index_from_row_column(i: u32, j: u32, size: u32) -> u32 {
     i * size + j
 }
 
 impl DirectedGraph {
-    pub fn empty(vertex_count: usize) -> Self {
+    pub fn empty(vertex_count: u32) -> Self {
         Self {
             vertex_count,
-            adjacency_matrix: FixedBitSet::with_capacity(vertex_count * vertex_count),
+            adjacency_matrix: RoaringBitmap::new(),
         }
     }
 
-    pub fn from_edges_iter<I>(vertex_count: usize, edges: I) -> Self
+    pub fn from_edges_iter<I>(vertex_count: u32, edges: I) -> Self
     where
-        I: Iterator<Item = (usize, usize)>,
+        I: Iterator<Item = (u32, u32)>,
     {
-        let mut adjacency_matrix = FixedBitSet::with_capacity(vertex_count * vertex_count);
+        let mut adjacency_matrix = RoaringBitmap::new();
         for (from, to) in edges {
             let index = unchecked_get_index_from_row_column(from, to, vertex_count);
-            adjacency_matrix.set(index, true);
+            adjacency_matrix.insert(index.try_into().unwrap());
         }
         Self {
             vertex_count,
@@ -64,52 +64,57 @@ impl DirectedGraph {
     }
 
     pub fn from_dag(dag: &DirectedAcyclicGraph) -> Self {
-        Self::from_edges_iter(dag.get_vertex_count(), dag.iter_edges())
+        Self::from_edges_iter(dag.get_vertex_count().try_into().unwrap(), dag.iter_edges().map(|(u, v)| (u.try_into().unwrap(), v.try_into().unwrap())))
     }
 
-    pub fn get_vertex_count(&self) -> usize {
+    pub fn get_vertex_count(&self) -> u32 {
         self.vertex_count
     }
 
-    fn index_from_row_column(&self, i: usize, j: usize) -> usize {
+    fn index_from_row_column(&self, i: u32, j: u32) -> u32 {
         assert!(i < self.vertex_count);
         assert!(j < self.vertex_count);
         unchecked_get_index_from_row_column(i, j, self.vertex_count)
     }
 
     /// Iterates over the edges in an order that favors CPU cache locality.
-    pub fn iter_edges(&self) -> impl Iterator<Item = (usize, usize)> + '_ {
-        self.adjacency_matrix.ones().map(|index| {
+    pub fn iter_edges(&self) -> impl Iterator<Item = (u32, u32)> + '_ {
+        self.adjacency_matrix.iter().map(|index| {
             let row = index / self.vertex_count;
             let column = index % self.vertex_count;
             (row, column)
         })
     }
 
-    pub fn get_edge(&self, parent: usize, child: usize) -> bool {
+    pub fn get_edge(&self, parent: u32, child: u32) -> bool {
         assert_ne!(parent, child);
         assert!(parent < self.get_vertex_count());
         assert!(child < self.get_vertex_count());
         let index = self.index_from_row_column(parent, child);
-        self.adjacency_matrix[index]
+        self.adjacency_matrix.contains(index.try_into().unwrap())
     }
 
-    pub fn set_edge(&mut self, parent: usize, child: usize, exists: bool) {
+    pub fn set_edge(&mut self, parent: u32, child: u32, exists: bool) {
         assert_ne!(parent, child);
         assert!(parent < self.get_vertex_count());
         assert!(child < self.get_vertex_count());
         let index = self.index_from_row_column(parent, child);
-        self.adjacency_matrix.set(index, exists);
+        if exists {
+            self.adjacency_matrix.insert(index.try_into().unwrap());
+        }
+        else {
+            self.adjacency_matrix.remove(index.try_into().unwrap());
+        }
     }
 
     // Returns None if the graph has more than connected component or there's no root.
-    pub fn find_tree_root(&self) -> Option<usize> {
-        let mut candidates = FixedBitSet::with_capacity(self.vertex_count);
-        candidates.set_range(.., true);
+    pub fn find_tree_root(&self) -> Option<u32> {
+        let mut candidates = RoaringBitmap::new();
+        candidates.insert_range(0..self.vertex_count);
         for (_, to) in self.iter_edges() {
-            candidates.set(to, false);
+            candidates.remove(to);
         }
-        let roots: Vec<usize> = candidates.ones().collect();
+        let roots: Vec<u32> = candidates.iter().collect();
         if roots.len() != 1 {
             return None;
         }
@@ -117,20 +122,20 @@ impl DirectedGraph {
     }
 
     /// Iterates over vertices `v` such that there's an edge `(u, v)` in the graph.
-    pub fn extend_with_children(&self, children: &mut Vec<usize>, u: usize) {
+    pub fn extend_with_children(&self, children: &mut Vec<u32>, u: u32) {
         assert!(u < self.vertex_count);
         for v in 0..self.vertex_count {
-            if self.adjacency_matrix[u * self.vertex_count + v] {
+            if self.adjacency_matrix.contains(u * self.vertex_count + v) {
                 children.push(v);
             }
         }
     }
 
     /// Iterates over vertices `u` such that there's an edge `(u, v)` in the graph.
-    pub fn extend_with_parents(&self, parents: &mut Vec<usize>, v: usize) {
+    pub fn extend_with_parents(&self, parents: &mut Vec<u32>, v: u32) {
         assert!(v < self.vertex_count);
         for u in 0..self.vertex_count {
-            if self.adjacency_matrix[u * self.vertex_count + v] {
+            if self.adjacency_matrix.contains(u * self.vertex_count + v) {
                 parents.push(u);
             }
         }
@@ -146,14 +151,14 @@ impl DirectedGraph {
         }
 
         enum VisitStep {
-            VertexChild(usize),
+            VertexChild(u32),
             OutOfVertexChildren, // this marker is used as an indicator when to pop from the visitation stack
         }
 
-        let mut visited = FixedBitSet::with_capacity(self.vertex_count);
+        let mut visited = RoaringBitmap::new();
         while let Some(starting_vertex) = starting_vertices.pop() {
             let mut to_visit: Vec<VisitStep> = vec![VisitStep::VertexChild(starting_vertex)];
-            let mut path: Vec<usize> = Default::default();
+            let mut path: Vec<u32> = Default::default();
             while let Some(vertex) = to_visit.pop() {
                 match vertex {
                     VisitStep::VertexChild(vertex) => {
@@ -167,12 +172,12 @@ impl DirectedGraph {
                         }
                         path.push(vertex);
                         to_visit.push(VisitStep::OutOfVertexChildren);
-                        let mut children: Vec<usize> = Default::default();
+                        let mut children: Vec<u32> = Default::default();
                         self.extend_with_children(&mut children, vertex);
                         for child in children {
                             to_visit.push(VisitStep::VertexChild(child));
                         }
-                        visited.set(vertex, true);
+                        visited.insert(vertex);
                     }
                     VisitStep::OutOfVertexChildren => {
                         path.pop().unwrap();
@@ -187,21 +192,21 @@ impl DirectedGraph {
     /// order.
     pub fn iter_descendants_dfs(
         &self,
-        start_vertex: usize,
-    ) -> Box<dyn Iterator<Item = usize> + '_> {
+        start_vertex: u32,
+    ) -> Box<dyn Iterator<Item = u32> + '_> {
         let iter = DfsDescendantsIterator {
             digraph: self,
-            visited: FixedBitSet::with_capacity(self.get_vertex_count()),
+            visited: RoaringBitmap::new(),
             to_visit: vec![start_vertex],
         };
         let iter = iter.filter(move |vertex| *vertex != start_vertex);
         Box::new(iter)
     }
 
-    pub fn iter_ancestors_dfs(&self, start_vertex: usize) -> Box<dyn Iterator<Item = usize> + '_> {
+    pub fn iter_ancestors_dfs(&self, start_vertex: u32) -> Box<dyn Iterator<Item = u32> + '_> {
         let iter = DfsAncestorsIterator {
             digraph: self,
-            visited: FixedBitSet::with_capacity(self.get_vertex_count()),
+            visited: RoaringBitmap::new(),
             to_visit: vec![start_vertex],
         };
         let iter = iter.filter(move |vertex| *vertex != start_vertex);
@@ -210,40 +215,39 @@ impl DirectedGraph {
 
     /// Returns a set "seed" vertices of a DAG from which a traversal may start so
     /// that the process covers all vertices in the graph.
-    pub fn get_vertices_without_incoming_edges(&self) -> Vec<usize> {
+    pub fn get_vertices_without_incoming_edges(&self) -> Vec<u32> {
         let incoming_edges_count = {
-            let mut incoming_edges_count: Vec<usize> = vec![0; self.get_vertex_count()];
+            let mut incoming_edges_count: Vec<u32> = vec![0; self.get_vertex_count().try_into().unwrap()];
             for (_, v) in self.iter_edges() {
-                incoming_edges_count[v] += 1;
+                incoming_edges_count[usize::try_from(v).unwrap()] += 1;
             }
             incoming_edges_count
         };
 
-        let vertices_without_incoming_edges: Vec<usize> = incoming_edges_count
+        let vertices_without_incoming_edges: Vec<u32> = incoming_edges_count
             .into_iter()
             .enumerate()
             .filter(|(_, indegree)| *indegree == 0)
-            .map(|(vertex, _)| vertex)
+            .map(|(vertex, _)| vertex.try_into().unwrap())
             .collect();
 
         vertices_without_incoming_edges
     }
 
     /// Computes a mapping: vertex -> set of vertices that are descendants of vertex.
-    pub fn get_descendants(&self) -> Vec<FixedBitSet> {
-        let mut descendants: Vec<FixedBitSet> = vec![FixedBitSet::default(); self.get_vertex_count()];
+    pub fn get_descendants(&self) -> Vec<RoaringBitmap> {
+        let mut descendants: Vec<RoaringBitmap> = vec![RoaringBitmap::default(); self.get_vertex_count().try_into().unwrap()];
 
-        let mut children = Vec::with_capacity(self.get_vertex_count());
+        let mut children = Vec::with_capacity(self.get_vertex_count().try_into().unwrap());
         for u in (0..self.get_vertex_count()).rev() {
             children.clear();
             self.extend_with_children(&mut children, u);
-            let mut u_descendants = FixedBitSet::default();
+            let mut u_descendants = RoaringBitmap::default();
             for &v in &children {
-                u_descendants.union_with(&descendants[v]);
-                u_descendants.grow(v + 1);
-                u_descendants.set(v, true);
+                u_descendants |= descendants[usize::try_from(v).unwrap()].clone();
+                u_descendants.insert(v);
             }
-            descendants[u] = u_descendants;
+            descendants[usize::try_from(u).unwrap()] = u_descendants;
         }
 
         descendants
@@ -254,13 +258,13 @@ impl DirectedGraph {
     pub fn transitive_reduction(&self) -> DirectedGraph {
         let mut result = self.clone();
 
-        let mut children = Vec::with_capacity(self.get_vertex_count());
+        let mut children = Vec::with_capacity(self.get_vertex_count().try_into().unwrap());
         let descendants = self.get_descendants();
         for u in 0..self.get_vertex_count() {
             children.clear();
             self.extend_with_children(&mut children, u);
             for &v in &children {
-                for w in descendants[v].ones() {
+                for w in descendants[usize::try_from(v).unwrap()].iter() {
                     if w == v {
                         continue;
                     }
@@ -273,10 +277,10 @@ impl DirectedGraph {
 
     /// Visit all vertices of a DAG in a depth-first-search postorder, i.e. emitting
     /// vertices only after all their descendants have been emitted first.
-    pub fn iter_vertices_dfs_post_order(&self) -> Box<dyn Iterator<Item = usize> + '_> {
+    pub fn iter_vertices_dfs_post_order(&self) -> Box<dyn Iterator<Item = u32> + '_> {
         let iter = DfsPostOrderVerticesIterator {
             digraph: self,
-            visited: FixedBitSet::with_capacity(self.get_vertex_count()),
+            visited: RoaringBitmap::new(),
             to_visit: self.get_vertices_without_incoming_edges(),
         };
         Box::new(iter)
@@ -290,11 +294,11 @@ impl DirectedGraph {
     /// that poset.  It may be necessary to first compute either a [`crate::transitive_reduction`] of a
     /// DAG, to only get the minimal set of pairs spanning the entire poset, or a
     /// [`crate::transitive_closure`] to get all the pairs of that poset.
-    pub fn iter_edges_dfs_post_order(&self) -> Box<dyn Iterator<Item = (usize, usize)> + '_> {
+    pub fn iter_edges_dfs_post_order(&self) -> Box<dyn Iterator<Item = (u32, u32)> + '_> {
         let iter = DfsPostOrderEdgesIterator {
             digraph: self,
             inner: self.iter_vertices_dfs_post_order(),
-            seen_vertices: FixedBitSet::with_capacity(self.get_vertex_count()),
+            seen_vertices: RoaringBitmap::new(),
             buffer: Default::default(),
         };
         Box::new(iter)
@@ -328,32 +332,32 @@ impl DirectedGraph {
     }
 }
 
-pub fn arb_prufer_sequence(vertex_count: usize) -> BoxedStrategy<Vec<usize>> {
+pub fn arb_prufer_sequence(vertex_count: u32) -> BoxedStrategy<Vec<u32>> {
     assert!(vertex_count >= 2); // trees smaller than this have to be enumerated by hand
-    proptest::collection::vec(0..vertex_count, vertex_count - 2).boxed()
+    proptest::collection::vec(0..vertex_count, usize::try_from(vertex_count - 2).unwrap()).boxed()
 }
 
 // https://www.geeksforgeeks.org/random-tree-generator-using-prufer-sequence-with-examples/
 // https://en.wikipedia.org/wiki/Pr%C3%BCfer_sequence#Algorithm_to_convert_a_Pr%C3%BCfer_sequence_into_a_tree
-pub fn random_tree_from_prufer_sequence(prufer_sequence: &[usize]) -> DirectedGraph {
+pub fn random_tree_from_prufer_sequence(prufer_sequence: &[u32]) -> DirectedGraph {
     let nvertices = prufer_sequence.len() + 2;
 
-    let mut degree: Vec<usize> = Vec::with_capacity(nvertices);
+    let mut degree: Vec<u32> = Vec::with_capacity(nvertices);
     degree.resize(nvertices, 1);
 
-    let mut tree = DirectedGraph::empty(nvertices);
+    let mut tree = DirectedGraph::empty(nvertices.try_into().unwrap());
 
     // Number of occurrences of vertex in code
     for i in prufer_sequence {
-        degree[*i] += 1;
+        degree[usize::try_from(*i).unwrap()] += 1;
     }
 
     // Find the smallest label not present in prufer_sequence[]
     for i in prufer_sequence {
         for j in 0..nvertices {
             if degree[j] == 1 {
-                tree.set_edge(*i, j, true);
-                degree[*i] -= 1;
+                tree.set_edge(*i, u32::try_from(j).unwrap(), true);
+                degree[usize::try_from(*i).unwrap()] -= 1;
                 degree[j] -= 1;
                 break;
             }
@@ -361,14 +365,14 @@ pub fn random_tree_from_prufer_sequence(prufer_sequence: &[usize]) -> DirectedGr
     }
 
     let (u, v) = {
-        let mut u: Option<usize> = None;
-        let mut v: Option<usize> = None;
+        let mut u: Option<u32> = None;
+        let mut v: Option<u32> = None;
         for i in 0..nvertices {
             if degree[i] == 1 {
                 if u == None {
-                    u = Some(i);
+                    u = Some(i.try_into().unwrap());
                 } else {
-                    v = Some(i);
+                    v = Some(i.try_into().unwrap());
                     break;
                 }
             }
@@ -380,7 +384,7 @@ pub fn random_tree_from_prufer_sequence(prufer_sequence: &[usize]) -> DirectedGr
     tree
 }
 
-pub fn arb_tree(max_vertex_count: usize) -> BoxedStrategy<DirectedGraph> {
+pub fn arb_tree(max_vertex_count: u32) -> BoxedStrategy<DirectedGraph> {
     // TODO Union the strategy with manually-created base cases: empty graph, single-node graph.
     (2..max_vertex_count)
         .prop_flat_map(|vertex_count| {
@@ -395,16 +399,16 @@ pub fn arb_tree(max_vertex_count: usize) -> BoxedStrategy<DirectedGraph> {
 /// See [`iter_vertices_dfs`].
 pub(crate) struct DfsDescendantsIterator<'a, G: TraversableDirectedGraph> {
     pub(crate) digraph: &'a G,
-    pub(crate) visited: FixedBitSet,
-    pub(crate) to_visit: Vec<usize>,
+    pub(crate) visited: RoaringBitmap,
+    pub(crate) to_visit: Vec<u32>,
 }
 
 impl<'a, G: TraversableDirectedGraph> Iterator for DfsDescendantsIterator<'a, G> {
-    type Item = usize;
+    type Item = u32;
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(u) = self.to_visit.pop() {
-            if self.visited[u] {
+            if self.visited.contains(u) {
                 continue;
             }
             self.digraph.extend_with_children(&mut self.to_visit, u);
@@ -417,16 +421,16 @@ impl<'a, G: TraversableDirectedGraph> Iterator for DfsDescendantsIterator<'a, G>
 
 pub(crate) struct DfsAncestorsIterator<'a, G: TraversableDirectedGraph> {
     pub(crate) digraph: &'a G,
-    pub(crate) visited: FixedBitSet,
-    pub(crate) to_visit: Vec<usize>,
+    pub(crate) visited: RoaringBitmap,
+    pub(crate) to_visit: Vec<u32>,
 }
 
 impl<'a, G: TraversableDirectedGraph> Iterator for DfsAncestorsIterator<'a, G> {
-    type Item = usize;
+    type Item = u32;
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(u) = self.to_visit.pop() {
-            if self.visited[u] {
+            if self.visited.contains(u) {
                 continue;
             }
             self.digraph.extend_with_parents(&mut self.to_visit, u);
@@ -440,12 +444,12 @@ impl<'a, G: TraversableDirectedGraph> Iterator for DfsAncestorsIterator<'a, G> {
 /// See [`iter_vertices_dfs_post_order`].
 pub(crate) struct DfsPostOrderVerticesIterator<'a, G: TraversableDirectedGraph> {
     pub(crate) digraph: &'a G,
-    pub(crate) visited: FixedBitSet,
-    pub(crate) to_visit: Vec<usize>,
+    pub(crate) visited: RoaringBitmap,
+    pub(crate) to_visit: Vec<u32>,
 }
 
 impl<'a, G: TraversableDirectedGraph> Iterator for DfsPostOrderVerticesIterator<'a, G> {
-    type Item = usize;
+    type Item = u32;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -453,21 +457,21 @@ impl<'a, G: TraversableDirectedGraph> Iterator for DfsPostOrderVerticesIterator<
                 Some(u) => u,
                 None => return None,
             };
-            if self.visited[u] {
+            if self.visited.contains(u) {
                 self.to_visit.pop();
                 continue;
             }
-            let unvisited_neighbours: Vec<usize> = {
-                let mut neighbours: Vec<usize> = Default::default();
+            let unvisited_neighbours: Vec<u32> = {
+                let mut neighbours: Vec<u32> = Default::default();
                 self.digraph.extend_with_children(&mut neighbours, u);
-                neighbours.retain(|v| !self.visited[*v]);
+                neighbours.retain(|v| !self.visited.contains(*v));
                 neighbours
             };
             if unvisited_neighbours.is_empty() {
                 // We have visited all the descendants of u.  We can now emit u
                 // from the iterator.
                 self.to_visit.pop();
-                self.visited.set(u, true);
+                self.visited.insert(u);
                 return Some(u);
             }
             self.to_visit.extend(unvisited_neighbours);
@@ -478,13 +482,13 @@ impl<'a, G: TraversableDirectedGraph> Iterator for DfsPostOrderVerticesIterator<
 /// See [`iter_edges_dfs_post_order`].
 pub(crate) struct DfsPostOrderEdgesIterator<'a, G: TraversableDirectedGraph> {
     pub(crate) digraph: &'a G,
-    pub(crate) inner: Box<dyn Iterator<Item = usize> + 'a>,
-    pub(crate) seen_vertices: FixedBitSet,
-    pub(crate) buffer: VecDeque<(usize, usize)>,
+    pub(crate) inner: Box<dyn Iterator<Item = u32> + 'a>,
+    pub(crate) seen_vertices: RoaringBitmap,
+    pub(crate) buffer: VecDeque<(u32, u32)>,
 }
 
 impl<'a, G: TraversableDirectedGraph> Iterator for DfsPostOrderEdgesIterator<'a, G> {
-    type Item = (usize, usize);
+    type Item = (u32, u32);
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
@@ -494,14 +498,14 @@ impl<'a, G: TraversableDirectedGraph> Iterator for DfsPostOrderEdgesIterator<'a,
 
             let u = self.inner.next()?;
 
-            let mut children: Vec<usize> = Default::default();
+            let mut children: Vec<u32> = Default::default();
             self.digraph.extend_with_children(&mut children, u);
             for v in children {
-                if self.seen_vertices[v] {
+                if self.seen_vertices.contains(v) {
                     self.buffer.push_back((u, v));
                 }
             }
-            self.seen_vertices.set(u, true);
+            self.seen_vertices.insert(u);
         }
     }
 }
