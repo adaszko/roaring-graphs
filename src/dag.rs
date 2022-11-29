@@ -27,10 +27,7 @@
 //!   get basic tasks done.
 //! * **Asymptotic complexity reduction**: Generating a random DAG is a `O(|E|)`
 //!   operation.  That was actually the original motivation for writing this
-//!   crate.  It can be used with
-//!   [quickcheck](https://crates.io/crates/quickcheck) efficiently.  In fact,
-//!   [`DirectedAcyclicGraph`] implements [`quickcheck::Arbitrary`] (with
-//!   meaningful shrinking).
+//!   crate.
 //!
 //! ## Anti-features
 //!
@@ -53,9 +50,8 @@ use std::io::Write;
 
 use fixedbitset::FixedBitSet;
 use proptest::prelude::*;
-use quickcheck::{Arbitrary, Gen};
-use rand::{prelude::StdRng, Rng, SeedableRng};
-use rand_distr::{Bernoulli, Distribution};
+use rand::Rng;
+use rand_distr::Distribution;
 
 use crate::TraversableDirectedGraph;
 use crate::strictly_upper_triangular_logical_matrix::{
@@ -457,26 +453,6 @@ pub fn break_at(
     (left, right)
 }
 
-impl Arbitrary for DirectedAcyclicGraph {
-    fn arbitrary(g: &mut Gen) -> Self {
-        let vertex_count = g.size();
-        let seed = u64::arbitrary(g);
-        let mut rng = StdRng::seed_from_u64(seed);
-        let dag =
-            DirectedAcyclicGraph::random(vertex_count, &mut rng, Bernoulli::new(0.75).unwrap());
-        dag
-    }
-
-    fn shrink(&self) -> Box<dyn Iterator<Item = DirectedAcyclicGraph>> {
-        let vertex_count = self.get_vertex_count();
-        if vertex_count < 2 {
-            return Box::new(vec![].into_iter());
-        }
-        let (left, right) = break_at(self, vertex_count / 2);
-        Box::new(vec![left, right].into_iter())
-    }
-}
-
 pub fn arb_dag(max_vertex_count: usize) -> BoxedStrategy<DirectedAcyclicGraph> {
     (1..max_vertex_count)
         .prop_flat_map(|vertex_count| {
@@ -522,7 +498,6 @@ mod tests {
 
     use super::*;
 
-    use quickcheck::{quickcheck, Arbitrary, Gen};
 
     #[test]
     #[should_panic = "assertion failed: u < v"]
@@ -584,20 +559,17 @@ mod tests {
         assert_eq!(dag_pairs, expected);
     }
 
-    // This mostly ensures `iter_edges()` really returns *all* the edges.
-    fn prop_dag_reduces_to_nothing(mut dag: DirectedAcyclicGraph) -> bool {
-        let mut edges: Vec<(usize, usize)> = dag.iter_edges().collect();
-        while let Some((left, right)) = edges.pop() {
-            dag.set_edge(left, right, false);
-        }
-        let edges: Vec<(usize, usize)> = dag.iter_edges().collect();
-        edges.is_empty()
-    }
-
-    quickcheck! {
-        fn random_dag_reduces_to_nothing(dag: DirectedAcyclicGraph) -> bool {
+    proptest! {
+        // This mostly ensures `iter_edges()` really returns *all* the edges.
+        #[test]
+        fn unblocking_preserves_transitivity(mut dag in arb_dag(25)) {
             println!("{:?}", dag);
-            prop_dag_reduces_to_nothing(dag)
+            let mut edges: Vec<(usize, usize)> = dag.iter_edges().collect();
+            while let Some((left, right)) = edges.pop() {
+                dag.set_edge(left, right, false);
+            }
+            let edges: Vec<(usize, usize)> = dag.iter_edges().collect();
+            prop_assert!(edges.is_empty());
         }
     }
 
@@ -647,59 +619,31 @@ mod tests {
         }
     }
 
-    impl Arbitrary for IntegerDivisibilityPoset {
-        fn arbitrary(g: &mut Gen) -> Self {
-            let range: Vec<usize> = (3..g.size()).collect();
-            IntegerDivisibilityPoset::of_number(*g.choose(&range).unwrap())
-        }
+    proptest! {
+        #[test]
+        fn prop_integer_divisibility_poset_isomorphism(size in 3usize..1000usize) {
+            let integer_divisibility_poset = IntegerDivisibilityPoset::of_number(size);
 
-        fn shrink(&self) -> Box<dyn Iterator<Item = IntegerDivisibilityPoset>> {
-            if self.number == 1 {
-                return Box::new(vec![].into_iter());
+            println!(
+                "{:10} {:?}",
+                integer_divisibility_poset.number, integer_divisibility_poset.divisors_of
+            );
+
+            let pairs = integer_divisibility_poset.get_pairs();
+
+            let dag = DirectedAcyclicGraph::from_edges_iter(
+                integer_divisibility_poset.number + 1,
+                pairs.iter().cloned(),
+            );
+
+            for (left, right) in pairs {
+                prop_assert!(dag.get_edge(left, right));
             }
-            let new_number = self.number / 2;
-            let smaller_number: usize = *self
-                .divisors_of
-                .keys()
-                .filter(|&k| *k <= new_number)
-                .max()
-                .unwrap();
-            Box::new(vec![IntegerDivisibilityPoset::of_number(smaller_number)].into_iter())
+
+            for (left, right) in dag.iter_edges() {
+                prop_assert_eq!(right % left, 0);
+            }
         }
-    }
-
-    fn prop_integer_divisibility_poset_isomorphism(
-        integer_divisibility_poset: IntegerDivisibilityPoset,
-    ) -> bool {
-        println!(
-            "{:10} {:?}",
-            integer_divisibility_poset.number, integer_divisibility_poset.divisors_of
-        );
-
-        let pairs = integer_divisibility_poset.get_pairs();
-
-        let dag = DirectedAcyclicGraph::from_edges_iter(
-            integer_divisibility_poset.number + 1,
-            pairs.iter().cloned(),
-        );
-
-        for (left, right) in pairs {
-            assert!(dag.get_edge(left, right), "({}, {})", left, right);
-        }
-
-        for (left, right) in dag.iter_edges() {
-            assert!(right % left == 0, "({}, {})", left, right);
-        }
-
-        true
-    }
-
-    #[test]
-    fn integer_divisibility_poset_isomorphism() {
-        let gen = quickcheck::Gen::new(1000);
-        quickcheck::QuickCheck::new().gen(gen).quickcheck(
-            prop_integer_divisibility_poset_isomorphism as fn(IntegerDivisibilityPoset) -> bool,
-        );
     }
 
     #[test]
@@ -803,25 +747,22 @@ mod tests {
         );
     }
 
-    fn prop_transitive_closure_and_transitive_reduction_intersection_equals_transitive_reduction_modulo_order(
-        dag: DirectedAcyclicGraph,
-    ) -> bool {
-        println!("{:?}", dag);
-        let transitive_closure: HashSet<(usize, usize)> =
-            dag.transitive_closure().iter_edges().collect();
-        let transitive_reduction: HashSet<(usize, usize)> =
-            dag.transitive_reduction().iter_edges().collect();
-        let intersection: HashSet<(usize, usize)> = transitive_closure
-            .intersection(&transitive_reduction)
-            .cloned()
-            .collect();
-        intersection == transitive_reduction
-    }
-
-    #[test]
-    fn transitive_closure_and_transitive_reduction_intersection_equals_transitive_reduction_modulo_order(
-    ) {
-        quickcheck::QuickCheck::new().quickcheck(prop_transitive_closure_and_transitive_reduction_intersection_equals_transitive_reduction_modulo_order as fn(DirectedAcyclicGraph) -> bool);
+    proptest! {
+        #[test]
+        fn prop_transitive_closure_and_transitive_reduction_intersection_equals_transitive_reduction_modulo_order(
+            dag in arb_dag(25),
+        ) {
+            println!("{:?}", dag);
+            let transitive_closure: HashSet<(usize, usize)> =
+                dag.transitive_closure().iter_edges().collect();
+            let transitive_reduction: HashSet<(usize, usize)> =
+                dag.transitive_reduction().iter_edges().collect();
+            let intersection: HashSet<(usize, usize)> = transitive_closure
+                .intersection(&transitive_reduction)
+                .cloned()
+                .collect();
+            prop_assert_eq!(intersection, transitive_reduction);
+        }
     }
 
     #[test]
@@ -856,30 +797,27 @@ mod tests {
 
         assert_eq!(
             dag.iter_descendants_dfs(12).collect::<Vec<usize>>(),
-            vec![12]
+            vec![]
         );
         assert_eq!(
             dag.iter_descendants_dfs(11).collect::<Vec<usize>>(),
-            vec![11]
+            vec![]
         );
         assert_eq!(
             dag.iter_descendants_dfs(6).collect::<Vec<usize>>(),
-            vec![6, 12]
+            vec![12]
         );
     }
 
-    fn prop_traversals_equal_modulo_order(dag: DirectedAcyclicGraph) {
-        let bfs: HashSet<usize> = dag.iter_vertices_bfs().collect();
-        let dfs: HashSet<usize> = dag.iter_vertices_dfs().collect();
-        let dfs_post_order: HashSet<usize> = dag.iter_vertices_dfs_post_order().collect();
-        assert_eq!(bfs, dfs);
-        assert_eq!(dfs_post_order, dfs);
-        assert_eq!(dfs_post_order, bfs);
-    }
-
-    #[test]
-    fn traversals_equal_modulo_order() {
-        quickcheck::QuickCheck::new()
-            .quickcheck(prop_traversals_equal_modulo_order as fn(DirectedAcyclicGraph));
+    proptest! {
+        #[test]
+        fn traversals_equal_modulo_order(dag in arb_dag(25)) {
+            let bfs: HashSet<usize> = dag.iter_vertices_bfs().collect();
+            let dfs: HashSet<usize> = dag.iter_vertices_dfs().collect();
+            let dfs_post_order: HashSet<usize> = dag.iter_vertices_dfs_post_order().collect();
+            prop_assert_eq!(&bfs, &dfs);
+            prop_assert_eq!(&dfs_post_order, &dfs);
+            prop_assert_eq!(&dfs_post_order, &bfs);
+        }
     }
 }
