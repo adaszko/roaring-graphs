@@ -60,6 +60,14 @@ fn unchecked_get_index_from_row_column(i: u32, j: u32, size: u32) -> u32 {
     ((2 * size - i - 1) * i) / 2 + j - i - 1
 }
 
+#[inline]
+fn index_from_row_column(i: u32, j: u32, size: u32) -> u32 {
+    assert!(i < size);
+    assert!(j < size);
+    assert!(i < j);
+    unchecked_get_index_from_row_column(i, j, size)
+}
+
 impl StrictlyUpperTriangularLogicalMatrix {
     pub fn zeroed(size: u32) -> Self {
         Self {
@@ -76,11 +84,12 @@ impl StrictlyUpperTriangularLogicalMatrix {
     }
 
     pub fn from_iter<I: Iterator<Item = (u32, u32)>>(size: u32, iter: I) -> Self {
-        let mut matrix = Self::zeroed(size);
+        let mut bitmap = RoaringBitmap::new();
         for (i, j) in iter {
-            matrix.set(i, j, true);
+            let index = index_from_row_column(i, j, size);
+            bitmap.insert(index);
         }
-        matrix
+        Self::from_bitset(size, bitmap)
     }
 
     #[inline]
@@ -88,22 +97,14 @@ impl StrictlyUpperTriangularLogicalMatrix {
         self.size
     }
 
-    #[inline]
-    fn index_from_row_column(&self, i: u32, j: u32) -> u32 {
-        assert!(i < self.size);
-        assert!(j < self.size);
-        assert!(i < j);
-        unchecked_get_index_from_row_column(i, j, self.size)
-    }
-
     pub fn get(&self, i: u32, j: u32) -> bool {
-        let index = self.index_from_row_column(i, j);
+        let index = index_from_row_column(i, j, self.size);
         self.matrix.contains(index)
     }
 
     /// Returns the previous value.
     pub fn set(&mut self, i: u32, j: u32, value: bool) -> bool {
-        let index = self.index_from_row_column(i, j);
+        let index = index_from_row_column(i, j, self.size);
         let current = self.matrix.contains(index);
         if value {
             self.matrix.insert(index);
