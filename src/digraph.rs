@@ -291,9 +291,8 @@ impl DirectedGraph {
     ///
     /// Note that when a DAG represents a [partially ordered
     /// set](https://en.wikipedia.org/wiki/Partially_ordered_set), this function iterates over pairs of
-    /// that poset.  It may be necessary to first compute either a [`crate::transitive_reduction`] of a
-    /// DAG, to only get the minimal set of pairs spanning the entire poset, or a
-    /// [`crate::transitive_closure`] to get all the pairs of that poset.
+    /// that poset.  It may be necessary to first compute either a [`Self::transitive_reduction`] of a
+    /// DAG, to only get the minimal set of pairs spanning the entire poset.
     pub fn iter_edges_dfs_post_order(&self) -> Box<dyn Iterator<Item = (u32, u32)> + '_> {
         let iter = DfsPostOrderEdgesIterator {
             digraph: self,

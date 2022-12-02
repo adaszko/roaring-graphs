@@ -49,8 +49,6 @@ use std::collections::VecDeque;
 use std::io::Write;
 
 use proptest::prelude::*;
-use rand::Rng;
-use rand_distr::Distribution;
 use roaring::RoaringBitmap;
 
 use crate::strictly_upper_triangular_logical_matrix::{
@@ -224,9 +222,9 @@ impl DirectedAcyclicGraph {
     ///
     /// Note that when a DAG represents a [partially ordered
     /// set](https://en.wikipedia.org/wiki/Partially_ordered_set), this function iterates over pairs of
-    /// that poset.  It may be necessary to first compute either a [`crate::transitive_reduction`] of a
+    /// that poset.  It may be necessary to first compute either a [`Self::transitive_reduction`] of a
     /// DAG, to only get the minimal set of pairs spanning the entire poset, or a
-    /// [`crate::transitive_closure`] to get all the pairs of that poset.
+    /// [`Self::transitive_closure`] to get all the pairs of that poset.
     pub fn iter_edges_dfs_post_order(&self) -> Box<dyn Iterator<Item = (u32, u32)> + '_> {
         let iter = crate::digraph::DfsPostOrderEdgesIterator {
             digraph: self,
@@ -252,7 +250,7 @@ impl DirectedAcyclicGraph {
         Box::new(iter)
     }
 
-    /// Combines [`iter_vertices_dfs_post_order`], [`Iterator::collect()`] and
+    /// Combines [`Self::iter_vertices_dfs_post_order`], [`Iterator::collect()`] and
     /// [`slice::reverse()`] to get a topologically ordered sequence of vertices of a
     /// DAG.
     pub fn get_topologically_ordered_vertices(&self) -> Vec<u32> {
@@ -401,7 +399,7 @@ pub fn arb_dag(max_vertex_count: u32) -> BoxedStrategy<DirectedAcyclicGraph> {
         .boxed()
 }
 
-/// See [`iter_vertices_bfs`].
+/// See [`DirectedAcyclicGraph::iter_vertices_bfs`].
 pub struct BfsVerticesIterator<'a> {
     dag: &'a DirectedAcyclicGraph,
     visited: RoaringBitmap,
