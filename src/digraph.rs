@@ -2,10 +2,10 @@
 /// integers to bigger!
 use std::{collections::VecDeque, io::Write};
 
-use roaring::RoaringBitmap;
 use proptest::prelude::*;
+use roaring::RoaringBitmap;
 
-use crate::{TraversableDirectedGraph, dag::DirectedAcyclicGraph};
+use crate::{dag::DirectedAcyclicGraph, TraversableDirectedGraph};
 
 #[derive(Clone)]
 pub struct DirectedGraph {
@@ -64,7 +64,11 @@ impl DirectedGraph {
     }
 
     pub fn from_dag(dag: &DirectedAcyclicGraph) -> Self {
-        Self::from_edges_iter(dag.get_vertex_count().try_into().unwrap(), dag.iter_edges().map(|(u, v)| (u.try_into().unwrap(), v.try_into().unwrap())))
+        Self::from_edges_iter(
+            dag.get_vertex_count().try_into().unwrap(),
+            dag.iter_edges()
+                .map(|(u, v)| (u.try_into().unwrap(), v.try_into().unwrap())),
+        )
     }
 
     pub fn get_vertex_count(&self) -> u32 {
@@ -101,8 +105,7 @@ impl DirectedGraph {
         let index = self.index_from_row_column(parent, child);
         if exists {
             self.adjacency_matrix.insert(index.try_into().unwrap());
-        }
-        else {
+        } else {
             self.adjacency_matrix.remove(index.try_into().unwrap());
         }
     }
@@ -190,10 +193,7 @@ impl DirectedGraph {
 
     /// Visit all vertices reachable from `vertex` in a depth-first-search (DFS)
     /// order.
-    pub fn iter_descendants_dfs(
-        &self,
-        start_vertex: u32,
-    ) -> Box<dyn Iterator<Item = u32> + '_> {
+    pub fn iter_descendants_dfs(&self, start_vertex: u32) -> Box<dyn Iterator<Item = u32> + '_> {
         let iter = DfsDescendantsIterator {
             digraph: self,
             visited: RoaringBitmap::new(),
@@ -217,7 +217,8 @@ impl DirectedGraph {
     /// that the process covers all vertices in the graph.
     pub fn get_vertices_without_incoming_edges(&self) -> Vec<u32> {
         let incoming_edges_count = {
-            let mut incoming_edges_count: Vec<u32> = vec![0; self.get_vertex_count().try_into().unwrap()];
+            let mut incoming_edges_count: Vec<u32> =
+                vec![0; self.get_vertex_count().try_into().unwrap()];
             for (_, v) in self.iter_edges() {
                 incoming_edges_count[usize::try_from(v).unwrap()] += 1;
             }
@@ -236,7 +237,8 @@ impl DirectedGraph {
 
     /// Computes a mapping: vertex -> set of vertices that are descendants of vertex.
     pub fn get_descendants(&self) -> Vec<RoaringBitmap> {
-        let mut descendants: Vec<RoaringBitmap> = vec![RoaringBitmap::default(); self.get_vertex_count().try_into().unwrap()];
+        let mut descendants: Vec<RoaringBitmap> =
+            vec![RoaringBitmap::default(); self.get_vertex_count().try_into().unwrap()];
 
         let mut children = Vec::with_capacity(self.get_vertex_count().try_into().unwrap());
         for u in (0..self.get_vertex_count()).rev() {
@@ -383,8 +385,7 @@ pub fn random_tree_from_prufer_sequence(prufer_sequence: &[u32]) -> DirectedGrap
     tree
 }
 
-pub fn arb_tree(max_vertex_count: u32) -> BoxedStrategy<DirectedGraph> {
-    // TODO Union the strategy with manually-created base cases: empty graph, single-node graph.
+pub fn arb_nonempty_tree(max_vertex_count: u32) -> BoxedStrategy<DirectedGraph> {
     (2..max_vertex_count)
         .prop_flat_map(|vertex_count| {
             arb_prufer_sequence(vertex_count).prop_flat_map(move |prufer_sequence| {
@@ -393,6 +394,14 @@ pub fn arb_tree(max_vertex_count: u32) -> BoxedStrategy<DirectedGraph> {
             })
         })
         .boxed()
+}
+
+pub fn arb_tree(max_vertex_count: u32) -> BoxedStrategy<DirectedGraph> {
+    prop_oneof![
+        1 => Just(DirectedGraph::empty(max_vertex_count)).boxed(),
+        99 => arb_nonempty_tree(max_vertex_count),
+    ]
+    .boxed()
 }
 
 /// See [`iter_vertices_dfs`].
@@ -543,7 +552,7 @@ mod tests {
 
     proptest! {
         #[test]
-        fn arb_tree_has_exactly_one_root(tree in arb_tree(100)) {
+        fn arb_tree_has_exactly_one_root(tree in arb_nonempty_tree(100)) {
             prop_assert!(tree.find_tree_root().is_some());
         }
 

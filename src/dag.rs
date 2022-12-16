@@ -383,7 +383,8 @@ impl DirectedAcyclicGraph {
 }
 
 pub fn arb_dag(max_vertex_count: u32) -> BoxedStrategy<DirectedAcyclicGraph> {
-    (1..max_vertex_count)
+    let empty = Just(DirectedAcyclicGraph::empty(max_vertex_count)).boxed();
+    let nontrivial = (1..max_vertex_count)
         .prop_flat_map(|vertex_count| {
             let max_edges_count =
                 strictly_upper_triangular_logical_matrix::strictly_upper_triangular_matrix_capacity(
@@ -396,7 +397,13 @@ pub fn arb_dag(max_vertex_count: u32) -> BoxedStrategy<DirectedAcyclicGraph> {
                 },
             )
         })
-        .boxed()
+        .boxed();
+
+    prop_oneof![
+        1 => empty,
+        99 => nontrivial
+    ]
+    .boxed()
 }
 
 /// See [`DirectedAcyclicGraph::iter_vertices_bfs`].
