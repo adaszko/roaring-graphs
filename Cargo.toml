@@ -11,8 +11,6 @@ license = "Apache-2.0"
 
 
 [dependencies]
-rand = "0.8.4"
-rand_distr = "0.4.3"
 proptest = "1"
 cov-mark = "1.1"
 roaring = "0.10"
