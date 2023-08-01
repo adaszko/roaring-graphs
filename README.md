@@ -1,7 +1,3 @@
-[Directed Acyclic
-Graphs](https://en.wikipedia.org/wiki/Directed_acyclic_graph) (DAGs)
-represented as [Strictly Upper Triangular
-matrices](https://mathworld.wolfram.com/StrictlyUpperTriangularMatrix.html).
+A graph data structure library backed by [roaring bitmaps](https://roaringbitmap.org/).
 
-
-See [crate docs](https://docs.rs/dograph) for more information.
+Supports generation of arbitrary trees and DAGs for use in proptest tests.
