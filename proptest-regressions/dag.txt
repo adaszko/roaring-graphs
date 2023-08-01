@@ -1,0 +1,9 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc f5e622ab775b2c96b3b8c403a53213ba082dc69f187cfa9efde7a3669a4aea65 # shrinks to mut dag = DirectedAcyclicGraph::from_edges_iter(2, vec![(0, 0)].iter().cloned())
+cc 84418b9499708eb258dae91741b08213b7ea9f7301b17e8436ff743ef4990c72 # shrinks to dag = DirectedAcyclicGraph::from_edges_iter(2, vec![(0, 0)].iter().cloned())
+cc e99b0a4438200e19e59791f5f60f1ad3650831436f777005c183aef3f8421fa5 # shrinks to dag = DirectedAcyclicGraph::from_edges_iter(4, vec![(1, 0)].iter().cloned())

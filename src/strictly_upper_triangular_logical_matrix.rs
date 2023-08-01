@@ -1,47 +1,41 @@
-use roaring::RoaringBitmap;
+use roaring::{RoaringBitmap, MultiOps};
 
 pub const fn strictly_upper_triangular_matrix_capacity(n: u32) -> u32 {
     (n * n - n) / 2
 }
 
-pub struct CacheFriendlyMatrixIterator {
+pub struct StrictlyUpperTriangularMatrixRowColumnIterator {
     size: u32,
     i: u32,
     j: u32,
-    index: u32,
 }
 
-impl<'a> Iterator for CacheFriendlyMatrixIterator {
-    type Item = (u32, u32, u32); // (i, j, bitset index)
+impl StrictlyUpperTriangularMatrixRowColumnIterator {
+    pub fn new(size: u32) -> Self {
+        Self {
+            size,
+            i: 0,
+            j: 1,
+        }
+    }
+}
+
+impl<'a> Iterator for StrictlyUpperTriangularMatrixRowColumnIterator {
+    type Item = (u32, u32); // (i, j, bitset index)
 
     fn next(&mut self) -> Option<Self::Item> {
-        let result = (self.i, self.j, self.index);
+        let result = (self.i, self.j);
         if self.j < self.size - 1 {
             self.j += 1;
-            self.index += 1;
             return Some(result);
         }
         if self.i < self.size - 1 {
             self.i += 1;
             self.j = self.i + 1;
-            self.index += 1;
             return Some(result);
         }
         None
     }
-}
-
-pub fn iter_matrix_starting_at(i: u32, size: u32) -> CacheFriendlyMatrixIterator {
-    let j = i + 1;
-    let index = unchecked_get_index_from_row_column(i, j, size);
-    CacheFriendlyMatrixIterator { size, i, j, index }
-}
-
-/// Iterates over `(i, j)` pairs in an order that favors CPU cache locality.
-/// If your graph algorithm can process edges in an arbitrary order, it is
-/// recommended you use this iterator.
-pub fn iter_matrix(size: u32) -> CacheFriendlyMatrixIterator {
-    iter_matrix_starting_at(0, size)
 }
 
 /// A zero-indexed [row-major
@@ -56,8 +50,14 @@ pub struct StrictlyUpperTriangularLogicalMatrix {
 // Reference: https://www.intel.com/content/www/us/en/develop/documentation/onemkl-developer-reference-c/top/lapack-routines/matrix-storage-schemes-for-lapack-routines.html
 // Formulas adjusted for indexing from zero.
 #[inline]
-fn unchecked_get_index_from_row_column(i: u32, j: u32, size: u32) -> u32 {
-    ((2 * size - i - 1) * i) / 2 + j - i - 1
+fn unchecked_index_from_row_column(row: u32, column: u32, size: u32) -> u32 {
+    row * size + column
+}
+
+fn row_column_from_index(index: u32, size: u32) -> (u32, u32) {
+    let row = index / size;
+    let column = index % size;
+    (row, column)
 }
 
 #[inline]
@@ -65,7 +65,7 @@ fn index_from_row_column(i: u32, j: u32, size: u32) -> u32 {
     assert!(i < size);
     assert!(j < size);
     assert!(i < j);
-    unchecked_get_index_from_row_column(i, j, size)
+    unchecked_index_from_row_column(i, j, size)
 }
 
 impl StrictlyUpperTriangularLogicalMatrix {
@@ -103,7 +103,7 @@ impl StrictlyUpperTriangularLogicalMatrix {
     }
 
     /// Returns the previous value.
-    pub fn set(&mut self, i: u32, j: u32, value: bool) -> bool {
+    pub fn set_to(&mut self, i: u32, j: u32, value: bool) -> bool {
         let index = index_from_row_column(i, j, self.size);
         let current = self.matrix.contains(index);
         if value {
@@ -114,22 +114,26 @@ impl StrictlyUpperTriangularLogicalMatrix {
         current
     }
 
+    /// Returns the previous value.
+    pub fn set(&mut self, i: u32, j: u32) {
+        let index = index_from_row_column(i, j, self.size);
+        self.matrix.insert(index);
+    }
+
+    pub fn clear(&mut self, i: u32, j: u32) {
+        let index = index_from_row_column(i, j, self.size);
+        self.matrix.remove(index);
+    }
+
     pub fn iter_ones(&self) -> impl Iterator<Item = (u32, u32)> + '_ {
-        iter_matrix(self.size()).filter_map(move |(i, j, index)| {
-            if self.matrix.contains(index) {
-                Some((i, j))
-            } else {
-                None
-            }
-        })
+        self.matrix.iter().map(|index| row_column_from_index(index, self.size))
     }
 
     pub fn iter_ones_at_row(&self, i: u32) -> impl Iterator<Item = u32> + '_ {
         assert!(i < self.size());
-        iter_matrix_starting_at(i, self.size())
-            .take_while(move |(ii, _, _)| *ii == i)
-            .filter(move |(_, _, index)| self.matrix.contains(*index))
-            .map(move |(_, jj, _)| jj)
+        let mask = RoaringBitmap::from_iter((i * self.size)..((i + 1) * self.size));
+        let result = [&self.matrix, &mask].intersection();
+        result.into_iter().map(|index| row_column_from_index(index, self.size).1)
     }
 }
 
@@ -144,46 +148,8 @@ mod tests {
         let ones: Vec<(u32, u32)> = matrix.iter_ones().collect();
         assert_eq!(ones, vec![]);
 
-        matrix.set(0, 1, true);
+        matrix.set_to(0, 1, true);
         let ones: Vec<(u32, u32)> = matrix.iter_ones().collect();
         assert_eq!(ones, vec![(0, 1)]);
-    }
-
-    #[test]
-    fn index_computation_is_sane() {
-        // 2x2
-        assert_eq!(unchecked_get_index_from_row_column(0, 1, 2), 0);
-
-        // 3x3
-        assert_eq!(unchecked_get_index_from_row_column(0, 1, 3), 0);
-        assert_eq!(unchecked_get_index_from_row_column(0, 2, 3), 1);
-        assert_eq!(unchecked_get_index_from_row_column(1, 2, 3), 2);
-
-        // 4x4
-        assert_eq!(unchecked_get_index_from_row_column(0, 1, 4), 0);
-        assert_eq!(unchecked_get_index_from_row_column(0, 2, 4), 1);
-        assert_eq!(unchecked_get_index_from_row_column(0, 3, 4), 2);
-        assert_eq!(unchecked_get_index_from_row_column(1, 2, 4), 3);
-        assert_eq!(unchecked_get_index_from_row_column(1, 3, 4), 4);
-        assert_eq!(unchecked_get_index_from_row_column(2, 3, 4), 5);
-    }
-
-    #[test]
-    fn test_matrix_iterator() {
-        let row_column_index: Vec<(u32, u32, u32)> = iter_matrix(3).collect();
-        assert_eq!(row_column_index, vec![(0, 1, 0), (0, 2, 1), (1, 2, 2),]);
-
-        let row_column_index: Vec<(u32, u32, u32)> = iter_matrix(4).collect();
-        assert_eq!(
-            row_column_index,
-            vec![
-                (0, 1, 0),
-                (0, 2, 1),
-                (0, 3, 2),
-                (1, 2, 3),
-                (1, 3, 4),
-                (2, 3, 5),
-            ]
-        );
     }
 }

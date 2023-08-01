@@ -81,7 +81,6 @@ impl DirectedGraph {
         unchecked_get_index_from_row_column(i, j, self.vertex_count)
     }
 
-    /// Iterates over the edges in an order that favors CPU cache locality.
     pub fn iter_edges(&self) -> impl Iterator<Item = (u32, u32)> + '_ {
         self.adjacency_matrix.iter().map(|index| {
             let row = index / self.vertex_count;
@@ -104,9 +103,9 @@ impl DirectedGraph {
         assert!(child < self.get_vertex_count());
         let index = self.index_from_row_column(parent, child);
         if exists {
-            self.adjacency_matrix.insert(index.try_into().unwrap());
+            self.adjacency_matrix.insert(index);
         } else {
-            self.adjacency_matrix.remove(index.try_into().unwrap());
+            self.adjacency_matrix.remove(index);
         }
     }
 

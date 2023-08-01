@@ -18,7 +18,9 @@
 //! In exchange for these assumptions you get these useful properties:
 //! * **Correctness**: Cycles (an illegal state) are unrepresentable.
 //! * **Compactness**: Edges are just bits in a bit set.  The implementation
-//!   uses just `(|V|*|V|-|V|)/2` *bits* of memory + a constant.
+//!   stores edges in a roaring bitmap with one bit per *existing* edge.  IOW: A graph with no
+//!   edges uses a constant amount of memory irrespective of its max number of vertices.  A full
+//!   graph is basically a bitset of all ones with one bit per edge.
 //! * **CPU cache locality**: Edges are stored in a [row-major packed
 //!   representation](https://www.intel.com/content/www/us/en/develop/documentation/onemkl-developer-reference-c/top/lapack-routines/matrix-storage-schemes-for-lapack-routines.html)
 //!   so that iteration over the neighbours of a vertex is just an iteration
@@ -52,7 +54,7 @@ use proptest::prelude::*;
 use roaring::RoaringBitmap;
 
 use crate::strictly_upper_triangular_logical_matrix::{
-    self, strictly_upper_triangular_matrix_capacity, StrictlyUpperTriangularLogicalMatrix,
+    self, strictly_upper_triangular_matrix_capacity, StrictlyUpperTriangularLogicalMatrix, StrictlyUpperTriangularMatrixRowColumnIterator,
 };
 use crate::TraversableDirectedGraph;
 
@@ -101,22 +103,27 @@ impl DirectedAcyclicGraph {
         Self { adjacency_matrix }
     }
 
-    pub fn from_random_edges(vertex_count: u32, edges: &[bool]) -> Self {
+    /// Assumes `edges` is a packed representation of the adjacency matrix representing a strictly upper
+    /// triangular matrix.  Such representation has a useful property: (1) Every bit sequence in
+    /// such a representation corresponds to some valid DAG and (2) Every DAG corresponds to some
+    /// valid bit sequence in such a representation.  Thanks to (1) and (2) taken together, we can
+    /// be sure proptest will cover the entire search space of random DAGs.
+    pub fn from_raw_edges(vertex_count: u32, edges: &[bool]) -> Self {
         assert_eq!(
             u32::try_from(edges.len()).unwrap(),
             strictly_upper_triangular_matrix_capacity(vertex_count)
         );
-        let mut bitset = RoaringBitmap::new();
-        for (index, value) in edges.iter().enumerate() {
-            let index: u32 = index.try_into().unwrap();
+
+        let mut iter = StrictlyUpperTriangularMatrixRowColumnIterator::new(vertex_count);
+        let mut adjacency_matrix = StrictlyUpperTriangularLogicalMatrix::zeroed(vertex_count);
+        for value in edges {
+            let (row, column) = iter.next().unwrap();
             if *value {
-                bitset.insert(index);
-            } else {
-                bitset.remove(index);
+                adjacency_matrix.set(row, column);
             }
         }
-        let matrix = StrictlyUpperTriangularLogicalMatrix::from_bitset(vertex_count, bitset);
-        let dag = DirectedAcyclicGraph::from_adjacency_matrix(matrix);
+
+        let dag = DirectedAcyclicGraph::from_adjacency_matrix(adjacency_matrix);
         dag
     }
 
@@ -127,7 +134,7 @@ impl DirectedAcyclicGraph {
 
     #[inline]
     pub fn get_vertex_count(&self) -> u32 {
-        self.adjacency_matrix.size().try_into().unwrap()
+        self.adjacency_matrix.size()
     }
 
     /// Requires `u < v`.  Panics otherwise.
@@ -139,14 +146,29 @@ impl DirectedAcyclicGraph {
     }
 
     /// Requires `u < v`.  Panics otherwise.
-    pub fn set_edge(&mut self, u: u32, v: u32, exists: bool) {
+    pub fn set_edge(&mut self, u: u32, v: u32) {
         assert!(u < self.get_vertex_count());
         assert!(v < self.get_vertex_count());
         assert!(u < v);
-        self.adjacency_matrix.set(u, v, exists);
+        self.adjacency_matrix.set(u, v);
     }
 
-    /// Iterates over the edges in an order that favors CPU cache locality.
+    /// Requires `u < v`.  Panics otherwise.
+    pub fn clear_edge(&mut self, u: u32, v: u32) {
+        assert!(u < self.get_vertex_count());
+        assert!(v < self.get_vertex_count());
+        assert!(u < v);
+        self.adjacency_matrix.clear(u, v);
+    }
+
+    /// Requires `u < v`.  Panics otherwise.
+    pub fn set_edge_to(&mut self, u: u32, v: u32, exists: bool) {
+        assert!(u < self.get_vertex_count());
+        assert!(v < self.get_vertex_count());
+        assert!(u < v);
+        self.adjacency_matrix.set_to(u, v, exists);
+    }
+
     pub fn iter_edges(&self) -> impl Iterator<Item = (u32, u32)> + '_ {
         self.adjacency_matrix.iter_ones()
     }
@@ -254,7 +276,7 @@ impl DirectedAcyclicGraph {
     /// [`slice::reverse()`] to get a topologically ordered sequence of vertices of a
     /// DAG.
     pub fn get_topologically_ordered_vertices(&self) -> Vec<u32> {
-        let mut result: Vec<u32> = Vec::new();
+        let mut result: Vec<u32> = Vec::with_capacity(self.get_vertex_count().try_into().unwrap());
         result.extend(self.iter_vertices_dfs_post_order());
         result.reverse();
         result
@@ -289,7 +311,7 @@ impl DirectedAcyclicGraph {
                     if w == v {
                         continue;
                     }
-                    result.set_edge(u, w, false);
+                    result.clear_edge(u, w);
                 }
             }
         }
@@ -306,7 +328,7 @@ impl DirectedAcyclicGraph {
         let descendants = self.get_descendants();
         for u in 0..self.get_vertex_count() {
             for v in descendants[usize::try_from(u).unwrap()].iter() {
-                result.set_edge(u, v, true);
+                result.set_edge(u, v);
             }
         }
 
@@ -392,7 +414,7 @@ pub fn arb_dag(max_vertex_count: u32) -> BoxedStrategy<DirectedAcyclicGraph> {
                 );
             proptest::bits::bool_vec::between(0, max_edges_count.try_into().unwrap()).prop_flat_map(
                 move |boolvec| {
-                    let dag = DirectedAcyclicGraph::from_random_edges(vertex_count, &boolvec);
+                    let dag = DirectedAcyclicGraph::from_raw_edges(vertex_count, &boolvec);
                     Just(dag).boxed()
                 },
             )
@@ -444,7 +466,7 @@ mod tests {
     fn negative_test_smallest_dag() {
         let mut dag = DirectedAcyclicGraph::empty(2);
         assert_eq!(dag.get_edge(0, 0), false);
-        dag.set_edge(0, 0, true);
+        dag.set_edge(0, 0);
     }
 
     #[test]
@@ -505,7 +527,7 @@ mod tests {
             println!("{:?}", dag);
             let mut edges: Vec<(u32, u32)> = dag.iter_edges().collect();
             while let Some((left, right)) = edges.pop() {
-                dag.set_edge(left, right, false);
+                dag.clear_edge(left, right);
             }
             let edges: Vec<(u32, u32)> = dag.iter_edges().collect();
             prop_assert!(edges.is_empty());
