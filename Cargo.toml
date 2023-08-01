@@ -1,13 +1,13 @@
 [package]
-name = "dograph"
+name = "roaring-graphs"
 version = "0.10.0"
 edition = "2021"
 authors = ["Adam Szkoda <adaszko@gmail.com>"]
-description = "Generate various classes of random graphs for use in property-based testing"
-homepage = "https://github.com/adaszko/dograph"
-repository = "https://github.com/adaszko/dograph"
-keywords = ["dag", "graph"]
-license = "GPL-3.0"
+description = "Graph data structure backed by roaring bitmaps"
+homepage = "https://github.com/adaszko/roaring-graphs"
+repository = "https://github.com/adaszko/roaring-graphs"
+keywords = ["dag", "graph", "proptest"]
+license = "Apache-2.0"
 
 
 [dependencies]
