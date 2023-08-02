@@ -132,20 +132,24 @@ impl DirectedGraph {
     /// Iterates over vertices `v` such that there's an edge `(u, v)` in the graph.
     pub fn extend_with_children(&self, children: &mut Vec<Vertex>, u: Vertex) {
         assert!(u < self.vertex_count);
+        let mut index = u * self.vertex_count;
         for v in 0..self.vertex_count {
-            if self.adjacency_matrix.contains((u * self.vertex_count + v).into()) {
+            if self.adjacency_matrix.contains(index.into()) {
                 children.push(v);
             }
+            index += 1;
         }
     }
 
     /// Iterates over vertices `u` such that there's an edge `(u, v)` in the graph.
     pub fn extend_with_parents(&self, parents: &mut Vec<Vertex>, v: Vertex) {
         assert!(v < self.vertex_count);
+        let mut index = v;
         for u in 0..self.vertex_count {
-            if self.adjacency_matrix.contains((u * self.vertex_count + v).into()) {
+            if self.adjacency_matrix.contains(index.into()) {
                 parents.push(u);
             }
+            index += self.vertex_count;
         }
     }
 

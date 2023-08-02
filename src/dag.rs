@@ -185,11 +185,7 @@ impl DirectedAcyclicGraph {
     }
 
     pub fn extend_with_parents(&self, parents: &mut Vec<Vertex>, v: Vertex) {
-        for u in 0..v {
-            if self.get_edge(u, v) {
-                parents.push(u);
-            }
-        }
+        parents.extend(self.adjacency_matrix.iter_ones_at_column(v))
     }
 
     /// Consume self and return the underlying adjacency matrix.

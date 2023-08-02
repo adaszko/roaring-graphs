@@ -1,4 +1,4 @@
-use roaring::{RoaringBitmap, MultiOps};
+use roaring::RoaringBitmap;
 
 #[inline]
 pub fn strictly_upper_triangular_matrix_capacity(n: u16) -> u32 {
@@ -54,6 +54,11 @@ pub struct StrictlyUpperTriangularLogicalMatrix {
 #[inline]
 fn index_from_row_column(row: u16, column: u16, size: u16) -> u32 {
     u32::from(row) * u32::from(size) + u32::from(column)
+}
+
+#[inline]
+fn row_from_index(index: u32, size: u16) -> u16 {
+    u16::try_from(index / u32::from(size)).unwrap()
 }
 
 #[inline]
@@ -131,9 +136,12 @@ impl StrictlyUpperTriangularLogicalMatrix {
 
     pub fn iter_ones_at_row(&self, i: u16) -> impl Iterator<Item = u16> + '_ {
         assert!(i < self.size());
-        let mask = RoaringBitmap::from_iter((u32::from(i) * u32::from(self.size))..(u32::from(i + 1) * u32::from(self.size)));
-        let ones_indexes = [&self.matrix, &mask].intersection();
-        ones_indexes.into_iter().map(|index| column_from_index(index, self.size))
+        ((i*self.size+i+1)..((i+1)*self.size)).into_iter().filter(|index| self.matrix.contains((*index).into())).map(|index| column_from_index(index.into(), self.size))
+    }
+
+    pub fn iter_ones_at_column(&self, j: u16) -> impl Iterator<Item = u16> + '_ {
+        assert!(j < self.size());
+        (0..j).step_by(usize::from(self.size)).into_iter().filter(|index| self.matrix.contains(u32::from(*index))).map(|index| row_from_index(index.into(), self.size))
     }
 }
 
