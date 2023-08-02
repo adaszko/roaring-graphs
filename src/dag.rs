@@ -35,8 +35,6 @@
 //!
 //! * No support for storing anything in the vertices.
 //! * No support for assigning weights to either edges or vertices.
-//! * No support for enumerating *incoming* edges of a vertex, only *outgoing*
-//!   ones.
 //! * No serde impls.  Simply serialize/deserialize the list of edges with a
 //!   library of your choosing.
 //!
