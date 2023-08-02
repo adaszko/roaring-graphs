@@ -57,6 +57,11 @@ fn index_from_row_column(row: u16, column: u16, size: u16) -> u32 {
 }
 
 #[inline]
+fn column_from_index(index: u32, size: u16) -> u16 {
+    u16::try_from(index % u32::from(size)).unwrap()
+}
+
+#[inline]
 fn row_column_from_index(index: u32, size: u16) -> (u16, u16) {
     let row = u16::try_from(index / u32::from(size)).unwrap();
     let column = u16::try_from(index % u32::from(size)).unwrap();
@@ -127,8 +132,8 @@ impl StrictlyUpperTriangularLogicalMatrix {
     pub fn iter_ones_at_row(&self, i: u16) -> impl Iterator<Item = u16> + '_ {
         assert!(i < self.size());
         let mask = RoaringBitmap::from_iter((u32::from(i) * u32::from(self.size))..(u32::from(i + 1) * u32::from(self.size)));
-        let result = [&self.matrix, &mask].intersection();
-        result.into_iter().map(|index| row_column_from_index(index, self.size).1)
+        let ones_indexes = [&self.matrix, &mask].intersection();
+        ones_indexes.into_iter().map(|index| column_from_index(index, self.size))
     }
 }
 
