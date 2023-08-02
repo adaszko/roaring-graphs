@@ -8,7 +8,7 @@
 
 //! There are several assumptions imposed on *your* code:
 //!
-//! 1. DAG vertices are integer numbers (`u32`) which is used to trivially
+//! 1. DAG vertices are integer numbers which is used to trivially
 //!    test whether adding an edge would form a cycle: edges are only allowed to
 //!    go "forward", i.e. from `u` to `v` iff `u < v`.  Otherwise we panic.
 //! 1. Vertices numbering starts at 0.
@@ -54,9 +54,10 @@ use proptest::prelude::*;
 use roaring::RoaringBitmap;
 
 use crate::strictly_upper_triangular_logical_matrix::{
-    self, strictly_upper_triangular_matrix_capacity, StrictlyUpperTriangularLogicalMatrix, StrictlyUpperTriangularMatrixRowColumnIterator,
+    self, strictly_upper_triangular_matrix_capacity, StrictlyUpperTriangularLogicalMatrix, RowColumnIterator,
 };
-use crate::TraversableDirectedGraph;
+use crate::{TraversableDirectedGraph, Vertex};
+
 
 /// A mutable, single-threaded directed acyclic graph.
 #[derive(Clone)]
@@ -66,7 +67,7 @@ pub struct DirectedAcyclicGraph {
 
 impl std::fmt::Debug for DirectedAcyclicGraph {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let ones: Vec<(u32, u32)> = self.iter_edges().collect();
+        let ones: Vec<(Vertex, Vertex)> = self.iter_edges().collect();
         write!(
             f,
             "DirectedAcyclicGraph::from_edges_iter({}, vec!{:?}.iter().cloned())",
@@ -78,17 +79,17 @@ impl std::fmt::Debug for DirectedAcyclicGraph {
 }
 
 impl TraversableDirectedGraph for DirectedAcyclicGraph {
-    fn extend_with_children(&self, children: &mut Vec<u32>, u: u32) {
+    fn extend_with_children(&self, children: &mut Vec<Vertex>, u: Vertex) {
         self.extend_with_children(children, u)
     }
 
-    fn extend_with_parents(&self, parents: &mut Vec<u32>, v: u32) {
+    fn extend_with_parents(&self, parents: &mut Vec<Vertex>, v: Vertex) {
         self.extend_with_parents(parents, v)
     }
 }
 
 impl DirectedAcyclicGraph {
-    pub fn empty(vertex_count: u32) -> Self {
+    pub fn empty(vertex_count: Vertex) -> Self {
         Self {
             adjacency_matrix: StrictlyUpperTriangularLogicalMatrix::zeroed(vertex_count),
         }
@@ -98,7 +99,7 @@ impl DirectedAcyclicGraph {
     ///
     /// Requires `u < vertex_count && v < vertex_count && u < v` for every edge
     /// `(u, v)` in `edges`.  Panics otherwise.
-    pub fn from_edges_iter<I: Iterator<Item = (u32, u32)>>(vertex_count: u32, edges: I) -> Self {
+    pub fn from_edges_iter<I: Iterator<Item = (Vertex, Vertex)>>(vertex_count: Vertex, edges: I) -> Self {
         let adjacency_matrix = StrictlyUpperTriangularLogicalMatrix::from_iter(vertex_count, edges);
         Self { adjacency_matrix }
     }
@@ -108,13 +109,13 @@ impl DirectedAcyclicGraph {
     /// such a representation corresponds to some valid DAG and (2) Every DAG corresponds to some
     /// valid bit sequence in such a representation.  Thanks to (1) and (2) taken together, we can
     /// be sure proptest will cover the entire search space of random DAGs.
-    pub fn from_raw_edges(vertex_count: u32, edges: &[bool]) -> Self {
+    pub fn from_raw_edges(vertex_count: Vertex, edges: &[bool]) -> Self {
         assert_eq!(
-            u32::try_from(edges.len()).unwrap(),
-            strictly_upper_triangular_matrix_capacity(vertex_count)
+            edges.len(),
+            usize::try_from(strictly_upper_triangular_matrix_capacity(vertex_count)).unwrap(),
         );
 
-        let mut iter = StrictlyUpperTriangularMatrixRowColumnIterator::new(vertex_count);
+        let mut iter = RowColumnIterator::new(vertex_count);
         let mut adjacency_matrix = StrictlyUpperTriangularLogicalMatrix::zeroed(vertex_count);
         for value in edges {
             let (row, column) = iter.next().unwrap();
@@ -133,12 +134,12 @@ impl DirectedAcyclicGraph {
     }
 
     #[inline]
-    pub fn get_vertex_count(&self) -> u32 {
+    pub fn get_vertex_count(&self) -> Vertex {
         self.adjacency_matrix.size()
     }
 
     /// Requires `u < v`.  Panics otherwise.
-    pub fn get_edge(&self, u: u32, v: u32) -> bool {
+    pub fn get_edge(&self, u: Vertex, v: Vertex) -> bool {
         assert!(u < self.get_vertex_count());
         assert!(v < self.get_vertex_count());
         assert!(u < v);
@@ -146,7 +147,7 @@ impl DirectedAcyclicGraph {
     }
 
     /// Requires `u < v`.  Panics otherwise.
-    pub fn set_edge(&mut self, u: u32, v: u32) {
+    pub fn set_edge(&mut self, u: Vertex, v: Vertex) {
         assert!(u < self.get_vertex_count());
         assert!(v < self.get_vertex_count());
         assert!(u < v);
@@ -154,7 +155,7 @@ impl DirectedAcyclicGraph {
     }
 
     /// Requires `u < v`.  Panics otherwise.
-    pub fn clear_edge(&mut self, u: u32, v: u32) {
+    pub fn clear_edge(&mut self, u: Vertex, v: Vertex) {
         assert!(u < self.get_vertex_count());
         assert!(v < self.get_vertex_count());
         assert!(u < v);
@@ -162,28 +163,28 @@ impl DirectedAcyclicGraph {
     }
 
     /// Requires `u < v`.  Panics otherwise.
-    pub fn set_edge_to(&mut self, u: u32, v: u32, exists: bool) {
+    pub fn set_edge_to(&mut self, u: Vertex, v: Vertex, exists: bool) {
         assert!(u < self.get_vertex_count());
         assert!(v < self.get_vertex_count());
         assert!(u < v);
         self.adjacency_matrix.set_to(u, v, exists);
     }
 
-    pub fn iter_edges(&self) -> impl Iterator<Item = (u32, u32)> + '_ {
+    pub fn iter_edges(&self) -> impl Iterator<Item = (Vertex, Vertex)> + '_ {
         self.adjacency_matrix.iter_ones()
     }
 
     /// Iterates over vertices `v` such that there's an edge `(u, v)` in the
     /// DAG.
-    pub fn iter_children(&self, u: u32) -> impl Iterator<Item = u32> + '_ {
+    pub fn iter_children(&self, u: Vertex) -> impl Iterator<Item = Vertex> + '_ {
         self.adjacency_matrix.iter_ones_at_row(u)
     }
 
-    pub fn extend_with_children(&self, children: &mut Vec<u32>, u: u32) {
+    pub fn extend_with_children(&self, children: &mut Vec<Vertex>, u: Vertex) {
         children.extend(self.adjacency_matrix.iter_ones_at_row(u))
     }
 
-    pub fn extend_with_parents(&self, parents: &mut Vec<u32>, v: u32) {
+    pub fn extend_with_parents(&self, parents: &mut Vec<Vertex>, v: Vertex) {
         for u in 0..v {
             if self.get_edge(u, v) {
                 parents.push(u);
@@ -198,7 +199,7 @@ impl DirectedAcyclicGraph {
 
     /// Visit all vertices reachable from `vertex` in a depth-first-search (DFS)
     /// order.
-    pub fn iter_descendants_dfs(&self, start_vertex: u32) -> Box<dyn Iterator<Item = u32> + '_> {
+    pub fn iter_descendants_dfs(&self, start_vertex: Vertex) -> Box<dyn Iterator<Item = Vertex> + '_> {
         let iter = crate::digraph::DfsDescendantsIterator {
             digraph: self,
             visited: RoaringBitmap::new(),
@@ -208,7 +209,7 @@ impl DirectedAcyclicGraph {
         Box::new(iter)
     }
 
-    pub fn iter_ancestors_dfs(&self, start_vertex: u32) -> Box<dyn Iterator<Item = u32> + '_> {
+    pub fn iter_ancestors_dfs(&self, start_vertex: Vertex) -> Box<dyn Iterator<Item = Vertex> + '_> {
         let iter = crate::digraph::DfsAncestorsIterator {
             digraph: self,
             visited: RoaringBitmap::new(),
@@ -219,7 +220,7 @@ impl DirectedAcyclicGraph {
     }
 
     /// Visit all vertices of a DAG in a depth-first-search (DFS) order.
-    pub fn iter_vertices_dfs(&self) -> Box<dyn Iterator<Item = u32> + '_> {
+    pub fn iter_vertices_dfs(&self) -> Box<dyn Iterator<Item = Vertex> + '_> {
         let iter = crate::digraph::DfsDescendantsIterator {
             digraph: self,
             visited: RoaringBitmap::new(),
@@ -230,7 +231,7 @@ impl DirectedAcyclicGraph {
 
     /// Visit all vertices of a DAG in a depth-first-search postorder, i.e. emitting
     /// vertices only after all their descendants have been emitted first.
-    pub fn iter_vertices_dfs_post_order(&self) -> Box<dyn Iterator<Item = u32> + '_> {
+    pub fn iter_vertices_dfs_post_order(&self) -> Box<dyn Iterator<Item = Vertex> + '_> {
         let iter = crate::digraph::DfsPostOrderVerticesIterator {
             digraph: self,
             visited: RoaringBitmap::new(),
@@ -247,7 +248,7 @@ impl DirectedAcyclicGraph {
     /// that poset.  It may be necessary to first compute either a [`Self::transitive_reduction`] of a
     /// DAG, to only get the minimal set of pairs spanning the entire poset, or a
     /// [`Self::transitive_closure`] to get all the pairs of that poset.
-    pub fn iter_edges_dfs_post_order(&self) -> Box<dyn Iterator<Item = (u32, u32)> + '_> {
+    pub fn iter_edges_dfs_post_order(&self) -> Box<dyn Iterator<Item = (Vertex, Vertex)> + '_> {
         let iter = crate::digraph::DfsPostOrderEdgesIterator {
             digraph: self,
             inner: self.iter_vertices_dfs_post_order(),
@@ -262,8 +263,8 @@ impl DirectedAcyclicGraph {
     /// emitted first.
     pub fn iter_descendants_dfs_post_order(
         &self,
-        vertex: u32,
-    ) -> Box<dyn Iterator<Item = u32> + '_> {
+        vertex: Vertex,
+    ) -> Box<dyn Iterator<Item = Vertex> + '_> {
         let iter = crate::digraph::DfsPostOrderVerticesIterator {
             digraph: self,
             visited: RoaringBitmap::new(),
@@ -275,8 +276,8 @@ impl DirectedAcyclicGraph {
     /// Combines [`Self::iter_vertices_dfs_post_order`], [`Iterator::collect()`] and
     /// [`slice::reverse()`] to get a topologically ordered sequence of vertices of a
     /// DAG.
-    pub fn get_topologically_ordered_vertices(&self) -> Vec<u32> {
-        let mut result: Vec<u32> = Vec::with_capacity(self.get_vertex_count().try_into().unwrap());
+    pub fn get_topologically_ordered_vertices(&self) -> Vec<Vertex> {
+        let mut result: Vec<Vertex> = Vec::with_capacity(self.get_vertex_count().try_into().unwrap());
         result.extend(self.iter_vertices_dfs_post_order());
         result.reverse();
         result
@@ -285,13 +286,13 @@ impl DirectedAcyclicGraph {
     /// Computes a mapping: vertex -> set of vertices that are descendants of vertex.
     pub fn get_descendants(&self) -> Vec<RoaringBitmap> {
         let mut descendants: Vec<RoaringBitmap> =
-            vec![RoaringBitmap::default(); self.get_vertex_count().try_into().unwrap()];
+            vec![RoaringBitmap::default(); self.get_vertex_count().into()];
 
         for u in (0..self.get_vertex_count()).rev() {
             let mut u_descendants = RoaringBitmap::default();
             for v in self.iter_children(u) {
-                u_descendants |= descendants[usize::try_from(v).unwrap()].clone();
-                u_descendants.insert(v);
+                u_descendants |= &descendants[usize::from(v)];
+                u_descendants.insert(v.into());
             }
             descendants[usize::try_from(u).unwrap()] = u_descendants;
         }
@@ -308,6 +309,7 @@ impl DirectedAcyclicGraph {
         for u in 0..self.get_vertex_count() {
             for v in self.iter_children(u) {
                 for w in descendants[usize::try_from(v).unwrap()].iter() {
+                    let w = Vertex::try_from(w).unwrap();
                     if w == v {
                         continue;
                     }
@@ -328,6 +330,7 @@ impl DirectedAcyclicGraph {
         let descendants = self.get_descendants();
         for u in 0..self.get_vertex_count() {
             for v in descendants[usize::try_from(u).unwrap()].iter() {
+                let v = Vertex::try_from(v).unwrap();
                 result.set_edge(u, v);
             }
         }
@@ -337,9 +340,9 @@ impl DirectedAcyclicGraph {
 
     /// Returns a set "seed" vertices of a DAG from which a traversal may start so
     /// that the process covers all vertices in the graph.
-    pub fn get_vertices_without_incoming_edges(&self) -> Vec<u32> {
+    pub fn get_vertices_without_incoming_edges(&self) -> Vec<Vertex> {
         let incoming_edges_count = {
-            let mut incoming_edges_count: Vec<u32> =
+            let mut incoming_edges_count: Vec<Vertex> =
                 vec![0; self.get_vertex_count().try_into().unwrap()];
             for (_, v) in self.iter_edges() {
                 incoming_edges_count[usize::try_from(v).unwrap()] += 1;
@@ -347,11 +350,11 @@ impl DirectedAcyclicGraph {
             incoming_edges_count
         };
 
-        let vertices_without_incoming_edges: Vec<u32> = incoming_edges_count
+        let vertices_without_incoming_edges: Vec<Vertex> = incoming_edges_count
             .into_iter()
             .enumerate()
             .filter(|(_, indegree)| *indegree == 0)
-            .map(|(vertex, _)| u32::try_from(vertex).unwrap())
+            .map(|(vertex, _)| Vertex::try_from(vertex).unwrap())
             .collect();
 
         vertices_without_incoming_edges
@@ -359,7 +362,7 @@ impl DirectedAcyclicGraph {
 
     /// Visit all vertices reachable from `vertex` in a breadth-first-search (BFS)
     /// order.
-    pub fn iter_descendants_bfs(&self, vertex: u32) -> BfsVerticesIterator {
+    pub fn iter_descendants_bfs(&self, vertex: Vertex) -> BfsVerticesIterator {
         BfsVerticesIterator {
             dag: self,
             visited: RoaringBitmap::new(),
@@ -404,7 +407,7 @@ impl DirectedAcyclicGraph {
     }
 }
 
-pub fn arb_dag(max_vertex_count: u32) -> BoxedStrategy<DirectedAcyclicGraph> {
+pub fn arb_dag(max_vertex_count: Vertex) -> BoxedStrategy<DirectedAcyclicGraph> {
     let empty = Just(DirectedAcyclicGraph::empty(max_vertex_count)).boxed();
     let nontrivial = (1..max_vertex_count)
         .prop_flat_map(|vertex_count| {
@@ -432,22 +435,22 @@ pub fn arb_dag(max_vertex_count: u32) -> BoxedStrategy<DirectedAcyclicGraph> {
 pub struct BfsVerticesIterator<'a> {
     dag: &'a DirectedAcyclicGraph,
     visited: RoaringBitmap,
-    to_visit: VecDeque<u32>,
+    to_visit: VecDeque<Vertex>,
 }
 
 impl<'a> Iterator for BfsVerticesIterator<'a> {
-    type Item = u32;
+    type Item = Vertex;
 
     fn next(&mut self) -> Option<Self::Item> {
         while let Some(u) = self.to_visit.pop_front() {
-            if self.visited.contains(u) {
+            if self.visited.contains(u.into()) {
                 continue;
             }
-            self.visited.insert(u);
+            self.visited.insert(u.into());
             self.to_visit.extend(
                 self.dag
                     .iter_children(u)
-                    .filter(|v| !self.visited.contains(*v)),
+                    .filter(|v| !self.visited.contains((*v).into())),
             );
             return Some(u);
         }
@@ -500,7 +503,7 @@ mod tests {
             DirectedAcyclicGraph::from_edges_iter(12 + 1, divisibility_poset_pairs.into_iter());
         let dag = dag.transitive_reduction();
 
-        let dag_pairs: HashSet<(u32, u32)> = HashSet::from_iter(dag.iter_edges_dfs_post_order());
+        let dag_pairs: HashSet<(Vertex, Vertex)> = HashSet::from_iter(dag.iter_edges_dfs_post_order());
         let expected = HashSet::from_iter(vec![
             (3, 9),
             (2, 6),
@@ -525,11 +528,11 @@ mod tests {
         #[test]
         fn unblocking_preserves_transitivity(mut dag in arb_dag(25)) {
             println!("{:?}", dag);
-            let mut edges: Vec<(u32, u32)> = dag.iter_edges().collect();
+            let mut edges: Vec<(Vertex, Vertex)> = dag.iter_edges().collect();
             while let Some((left, right)) = edges.pop() {
                 dag.clear_edge(left, right);
             }
-            let edges: Vec<(u32, u32)> = dag.iter_edges().collect();
+            let edges: Vec<(Vertex, Vertex)> = dag.iter_edges().collect();
             prop_assert!(edges.is_empty());
         }
     }
@@ -537,16 +540,16 @@ mod tests {
     /// Does not include the trivial divisors: k | k for every integer k.
     #[derive(Clone, Debug)]
     struct IntegerDivisibilityPoset {
-        number: u32,
-        divisors_of: BTreeMap<u32, Vec<u32>>,
+        number: Vertex,
+        divisors_of: BTreeMap<Vertex, Vec<Vertex>>,
     }
 
     impl IntegerDivisibilityPoset {
-        fn get_divisors(number: u32) -> BTreeMap<u32, Vec<u32>> {
-            let mut result: BTreeMap<u32, Vec<u32>> = Default::default();
-            let mut numbers: Vec<u32> = vec![number];
+        fn get_divisors(number: Vertex) -> BTreeMap<Vertex, Vec<Vertex>> {
+            let mut result: BTreeMap<Vertex, Vec<Vertex>> = Default::default();
+            let mut numbers: Vec<Vertex> = vec![number];
             while let Some(n) = numbers.pop() {
-                let divisors_of_n: Vec<u32> = (1..n / 2 + 1).filter(|d| n % d == 0).rev().collect();
+                let divisors_of_n: Vec<Vertex> = (1..n / 2 + 1).filter(|d| n % d == 0).rev().collect();
                 for divisor in &divisors_of_n {
                     if !result.contains_key(&divisor) {
                         numbers.push(*divisor);
@@ -557,14 +560,14 @@ mod tests {
             result
         }
 
-        fn of_number(number: u32) -> Self {
+        fn of_number(number: Vertex) -> Self {
             IntegerDivisibilityPoset {
                 number,
                 divisors_of: Self::get_divisors(number),
             }
         }
 
-        fn get_pairs(&self) -> Vec<(u32, u32)> {
+        fn get_pairs(&self) -> Vec<(Vertex, Vertex)> {
             let mut result = Vec::new();
 
             for divisor in self.divisors_of.keys() {
@@ -582,7 +585,7 @@ mod tests {
     proptest! {
         #[test]
         fn prop_integer_divisibility_poset_isomorphism(size in 3u32..1000u32) {
-            let integer_divisibility_poset = IntegerDivisibilityPoset::of_number(size);
+            let integer_divisibility_poset = IntegerDivisibilityPoset::of_number(size.try_into().unwrap());
 
             println!(
                 "{:10} {:?}",
@@ -635,21 +638,21 @@ mod tests {
         ];
         let dag =
             DirectedAcyclicGraph::from_edges_iter(12 + 1, divisibility_poset_pairs.into_iter());
-        assert_eq!(dag.iter_children(12).collect::<Vec<u32>>(), vec![]);
-        assert_eq!(dag.iter_children(11).collect::<Vec<u32>>(), vec![]);
-        assert_eq!(dag.iter_children(9).collect::<Vec<u32>>(), vec![]);
-        assert_eq!(dag.iter_children(8).collect::<Vec<u32>>(), vec![]);
-        assert_eq!(dag.iter_children(7).collect::<Vec<u32>>(), vec![]);
-        assert_eq!(dag.iter_children(6).collect::<Vec<u32>>(), vec![12]);
-        assert_eq!(dag.iter_children(5).collect::<Vec<u32>>(), vec![10]);
-        assert_eq!(dag.iter_children(4).collect::<Vec<u32>>(), vec![8, 12]);
-        assert_eq!(dag.iter_children(3).collect::<Vec<u32>>(), vec![6, 9, 12]);
+        assert_eq!(dag.iter_children(12).collect::<Vec<Vertex>>(), vec![]);
+        assert_eq!(dag.iter_children(11).collect::<Vec<Vertex>>(), vec![]);
+        assert_eq!(dag.iter_children(9).collect::<Vec<Vertex>>(), vec![]);
+        assert_eq!(dag.iter_children(8).collect::<Vec<Vertex>>(), vec![]);
+        assert_eq!(dag.iter_children(7).collect::<Vec<Vertex>>(), vec![]);
+        assert_eq!(dag.iter_children(6).collect::<Vec<Vertex>>(), vec![12]);
+        assert_eq!(dag.iter_children(5).collect::<Vec<Vertex>>(), vec![10]);
+        assert_eq!(dag.iter_children(4).collect::<Vec<Vertex>>(), vec![8, 12]);
+        assert_eq!(dag.iter_children(3).collect::<Vec<Vertex>>(), vec![6, 9, 12]);
         assert_eq!(
-            dag.iter_children(2).collect::<Vec<u32>>(),
+            dag.iter_children(2).collect::<Vec<Vertex>>(),
             vec![4, 6, 8, 10, 12]
         );
         assert_eq!(
-            dag.iter_children(1).collect::<Vec<u32>>(),
+            dag.iter_children(1).collect::<Vec<Vertex>>(),
             vec![2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12]
         );
     }
@@ -710,11 +713,11 @@ mod tests {
             dag in arb_dag(25),
         ) {
             println!("{:?}", dag);
-            let transitive_closure: HashSet<(u32, u32)> =
+            let transitive_closure: HashSet<(Vertex, Vertex)> =
                 dag.transitive_closure().iter_edges().collect();
-            let transitive_reduction: HashSet<(u32, u32)> =
+            let transitive_reduction: HashSet<(Vertex, Vertex)> =
                 dag.transitive_reduction().iter_edges().collect();
-            let intersection: HashSet<(u32, u32)> = transitive_closure
+            let intersection: HashSet<(Vertex, Vertex)> = transitive_closure
                 .intersection(&transitive_reduction)
                 .cloned()
                 .collect();
@@ -752,17 +755,17 @@ mod tests {
         let dag =
             DirectedAcyclicGraph::from_edges_iter(12 + 1, divisibility_poset_pairs.into_iter());
 
-        assert_eq!(dag.iter_descendants_dfs(12).collect::<Vec<u32>>(), vec![]);
-        assert_eq!(dag.iter_descendants_dfs(11).collect::<Vec<u32>>(), vec![]);
-        assert_eq!(dag.iter_descendants_dfs(6).collect::<Vec<u32>>(), vec![12]);
+        assert_eq!(dag.iter_descendants_dfs(12).collect::<Vec<Vertex>>(), vec![]);
+        assert_eq!(dag.iter_descendants_dfs(11).collect::<Vec<Vertex>>(), vec![]);
+        assert_eq!(dag.iter_descendants_dfs(6).collect::<Vec<Vertex>>(), vec![12]);
     }
 
     proptest! {
         #[test]
         fn traversals_equal_modulo_order(dag in arb_dag(25)) {
-            let bfs: HashSet<u32> = dag.iter_vertices_bfs().collect();
-            let dfs: HashSet<u32> = dag.iter_vertices_dfs().collect();
-            let dfs_post_order: HashSet<u32> = dag.iter_vertices_dfs_post_order().collect();
+            let bfs: HashSet<Vertex> = dag.iter_vertices_bfs().collect();
+            let dfs: HashSet<Vertex> = dag.iter_vertices_dfs().collect();
+            let dfs_post_order: HashSet<Vertex> = dag.iter_vertices_dfs_post_order().collect();
             prop_assert_eq!(&bfs, &dfs);
             prop_assert_eq!(&dfs_post_order, &dfs);
             prop_assert_eq!(&dfs_post_order, &bfs);
