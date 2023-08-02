@@ -65,7 +65,7 @@ impl DirectedGraph {
         let mut adjacency_matrix = RoaringBitmap::new();
         for (from, to) in edges {
             let index = index_from_row_column(from, to, vertex_count);
-            adjacency_matrix.insert(index.try_into().unwrap());
+            adjacency_matrix.insert(index);
         }
         Self {
             vertex_count,
@@ -75,9 +75,9 @@ impl DirectedGraph {
 
     pub fn from_dag(dag: &DirectedAcyclicGraph) -> Self {
         Self::from_edges_iter(
-            dag.get_vertex_count().try_into().unwrap(),
+            dag.get_vertex_count(),
             dag.iter_edges()
-                .map(|(u, v)| (u.try_into().unwrap(), v.try_into().unwrap())),
+                .map(|(u, v)| (u, v)),
         )
     }
 
@@ -100,7 +100,7 @@ impl DirectedGraph {
         assert!(parent < self.get_vertex_count());
         assert!(child < self.get_vertex_count());
         let index = self.index_from_row_column(parent, child);
-        self.adjacency_matrix.contains(index.try_into().unwrap())
+        self.adjacency_matrix.contains(index)
     }
 
     pub fn set_edge(&mut self, parent: Vertex, child: Vertex, exists: bool) {
@@ -223,7 +223,7 @@ impl DirectedGraph {
     pub fn get_vertices_without_incoming_edges(&self) -> Vec<Vertex> {
         let incoming_edges_count = {
             let mut incoming_edges_count: Vec<Vertex> =
-                vec![0; self.get_vertex_count().try_into().unwrap()];
+                vec![0; self.get_vertex_count().into()];
             for (_, v) in self.iter_edges() {
                 incoming_edges_count[usize::try_from(v).unwrap()] += 1;
             }
@@ -243,9 +243,9 @@ impl DirectedGraph {
     /// Computes a mapping: vertex -> set of vertices that are descendants of vertex.
     pub fn get_descendants(&self) -> Vec<RoaringBitmap> {
         let mut descendants: Vec<RoaringBitmap> =
-            vec![RoaringBitmap::default(); self.get_vertex_count().try_into().unwrap()];
+            vec![RoaringBitmap::default(); self.get_vertex_count().into()];
 
-        let mut children = Vec::with_capacity(self.get_vertex_count().try_into().unwrap());
+        let mut children = Vec::with_capacity(self.get_vertex_count().into());
         for u in (0..self.get_vertex_count()).rev() {
             children.clear();
             self.extend_with_children(&mut children, u);
@@ -265,7 +265,7 @@ impl DirectedGraph {
     pub fn transitive_reduction(&self) -> DirectedGraph {
         let mut result = self.clone();
 
-        let mut children = Vec::with_capacity(self.get_vertex_count().try_into().unwrap());
+        let mut children = Vec::with_capacity(self.get_vertex_count().into());
         let descendants = self.get_descendants();
         for u in 0..self.get_vertex_count() {
             children.clear();

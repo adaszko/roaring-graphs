@@ -277,7 +277,7 @@ impl DirectedAcyclicGraph {
     /// [`slice::reverse()`] to get a topologically ordered sequence of vertices of a
     /// DAG.
     pub fn get_topologically_ordered_vertices(&self) -> Vec<Vertex> {
-        let mut result: Vec<Vertex> = Vec::with_capacity(self.get_vertex_count().try_into().unwrap());
+        let mut result: Vec<Vertex> = Vec::with_capacity(self.get_vertex_count().into());
         result.extend(self.iter_vertices_dfs_post_order());
         result.reverse();
         result
@@ -343,7 +343,7 @@ impl DirectedAcyclicGraph {
     pub fn get_vertices_without_incoming_edges(&self) -> Vec<Vertex> {
         let incoming_edges_count = {
             let mut incoming_edges_count: Vec<Vertex> =
-                vec![0; self.get_vertex_count().try_into().unwrap()];
+                vec![0; self.get_vertex_count().into()];
             for (_, v) in self.iter_edges() {
                 incoming_edges_count[usize::try_from(v).unwrap()] += 1;
             }
