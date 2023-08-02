@@ -1,6 +1,6 @@
 [package]
 name = "roaring-graphs"
-version = "0.10.1"
+version = "0.11.0"
 edition = "2021"
 authors = ["Adam Szkoda <adaszko@gmail.com>"]
 description = "Graph data structure backed by roaring bitmaps"
