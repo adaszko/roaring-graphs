@@ -10,4 +10,4 @@ trait TraversableDirectedGraph {
 }
 
 pub use dag::{arb_dag, DirectedAcyclicGraph};
-pub use digraph::{arb_tree, DirectedGraph};
+pub use digraph::{arb_tree, arb_nonempty_tree, DirectedGraph};
