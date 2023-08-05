@@ -1,4 +1,4 @@
-use roaring::RoaringBitmap;
+use roaring::{RoaringBitmap, MultiOps};
 
 #[inline]
 pub fn strictly_upper_triangular_matrix_capacity(n: u16) -> u32 {
@@ -141,7 +141,9 @@ impl StrictlyUpperTriangularLogicalMatrix {
 
     pub fn iter_ones_at_column(&self, j: u16) -> impl Iterator<Item = u16> + '_ {
         assert!(j < self.size());
-        (0..j).map(move |i| i + j).step_by(usize::from(self.size)).into_iter().filter(|index| self.matrix.contains(u32::from(*index))).map(|index| row_from_index(index.into(), self.size))
+        let mask = RoaringBitmap::from_iter((0..j).map(|k| u32::from(k * self.size + j)));
+        let ones_indexes = [&self.matrix, &mask].intersection();
+        ones_indexes.into_iter().map(|index| row_from_index(index, self.size))
     }
 }
 
@@ -171,11 +173,22 @@ mod tests {
     }
 
     #[test]
-    fn ones_at_column() {
+    fn ones_at_column_bug1() {
         let mut matrix = StrictlyUpperTriangularLogicalMatrix::zeroed(3);
         matrix.set(0, 1);
         assert_eq!(Vec::from_iter(matrix.iter_ones_at_column(0)), vec![]);
         assert_eq!(Vec::from_iter(matrix.iter_ones_at_column(1)), vec![0]);
         assert_eq!(Vec::from_iter(matrix.iter_ones_at_column(2)), vec![]);
+    }
+
+    #[test]
+    fn ones_at_column_bug2() {
+        let matrix = StrictlyUpperTriangularLogicalMatrix::from_iter(5, vec![(1, 2)].into_iter());
+        dbg!(&matrix);
+        assert_eq!(Vec::from_iter(matrix.iter_ones_at_column(0)), vec![]);
+        assert_eq!(Vec::from_iter(matrix.iter_ones_at_column(1)), vec![]);
+        assert_eq!(Vec::from_iter(matrix.iter_ones_at_column(2)), vec![1]);
+        assert_eq!(Vec::from_iter(matrix.iter_ones_at_column(3)), vec![]);
+        assert_eq!(Vec::from_iter(matrix.iter_ones_at_column(4)), vec![]);
     }
 }
