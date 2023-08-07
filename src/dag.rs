@@ -94,7 +94,7 @@ impl DirectedAcyclicGraph {
         }
     }
 
-    /// Constructs a DAG from an iterator of edges.
+    /// Constructs a DAG from a iterator of edges.
     ///
     /// Requires `u < vertex_count && v < vertex_count && u < v` for every edge
     /// `(u, v)` in `edges`.  Panics otherwise.
@@ -127,7 +127,7 @@ impl DirectedAcyclicGraph {
         dag
     }
 
-    /// Construct a DAG from an pre-computed adjacency matrix.
+    /// Construct a DAG from a pre-computed adjacency matrix.
     pub fn from_adjacency_matrix(adjacency_matrix: StrictlyUpperTriangularLogicalMatrix) -> Self {
         Self { adjacency_matrix }
     }
@@ -161,6 +161,7 @@ impl DirectedAcyclicGraph {
         self.adjacency_matrix.clear(u, v);
     }
 
+    /// Each emitted pair `(u, v)` is guaranteed to satisfy `u < v`.
     pub fn iter_edges(&self) -> impl Iterator<Item = (Vertex, Vertex)> + '_ {
         self.adjacency_matrix.iter_ones()
     }
@@ -216,8 +217,8 @@ impl DirectedAcyclicGraph {
         Box::new(iter)
     }
 
-    /// Visit all vertices of a DAG in a depth-first-search postorder, i.e. emitting
-    /// vertices only after all their descendants have been emitted first.
+    /// Visit all vertices of a DAG in a depth-first-search postorder, i.e. emitting vertices only
+    /// after all their descendants were emitted first.
     pub fn iter_vertices_dfs_post_order(&self) -> Box<dyn Iterator<Item = Vertex> + '_> {
         let iter = crate::digraph::DfsPostOrderVerticesIterator {
             digraph: self,
@@ -227,14 +228,8 @@ impl DirectedAcyclicGraph {
         Box::new(iter)
     }
 
-    /// Visit nodes in a depth-first-search (DFS) emitting edges in postorder, i.e.
-    /// each node is visited after all its descendants have been already visited.
-    ///
-    /// Note that when a DAG represents a [partially ordered
-    /// set](https://en.wikipedia.org/wiki/Partially_ordered_set), this function iterates over pairs of
-    /// that poset.  It may be necessary to first compute either a [`Self::transitive_reduction`] of a
-    /// DAG, to only get the minimal set of pairs spanning the entire poset, or a
-    /// [`Self::transitive_closure`] to get all the pairs of that poset.
+    /// Visit nodes in a depth-first-search (DFS) emitting edges in postorder, i.e. each node is
+    /// visited after all its descendants were already visited.
     pub fn iter_edges_dfs_post_order(&self) -> Box<dyn Iterator<Item = (Vertex, Vertex)> + '_> {
         let iter = crate::digraph::DfsPostOrderEdgesIterator {
             digraph: self,
@@ -260,9 +255,8 @@ impl DirectedAcyclicGraph {
         Box::new(iter)
     }
 
-    /// Combines [`Self::iter_vertices_dfs_post_order`], [`Iterator::collect()`] and
-    /// [`slice::reverse()`] to get a topologically ordered sequence of vertices of a
-    /// DAG.
+    /// Combines [`Self::iter_vertices_dfs_post_order`] with [`slice::reverse()`] to get a
+    /// topologically ordered sequence of vertices of a DAG.
     pub fn get_topologically_ordered_vertices(&self) -> Vec<Vertex> {
         let mut result: Vec<Vertex> = Vec::with_capacity(self.get_vertex_count().into());
         result.extend(self.iter_vertices_dfs_post_order());

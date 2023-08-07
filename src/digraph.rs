@@ -59,6 +59,10 @@ impl DirectedGraph {
         }
     }
 
+    pub fn has_edges(&self) -> bool {
+        !self.adjacency_matrix.is_empty()
+    }
+
     pub fn from_edges_iter<I>(vertex_count: Vertex, edges: I) -> Self
     where
         I: Iterator<Item = (Vertex, Vertex)>,
@@ -120,7 +124,7 @@ impl DirectedGraph {
         self.adjacency_matrix.remove(index);
     }
 
-    // Returns None if the graph has more than connected component or there's no root.
+    /// Returns None if the graph has more than connected component or there's no root.
     pub fn find_tree_root(&self) -> Option<Vertex> {
         let mut candidates = RoaringBitmap::new();
         candidates.insert_range(0..u32::from(self.vertex_count));
@@ -158,53 +162,6 @@ impl DirectedGraph {
         }
     }
 
-    pub fn has_cycle(&self) -> bool {
-        let mut starting_vertices = self.get_vertices_without_incoming_edges();
-        if starting_vertices.is_empty() && self.iter_edges().next().is_some() {
-            // If there are no vertices without incoming edges and yet there are some edges the
-            // graph, we have a highly cyclic graph.
-            cov_mark::hit!(nonempty_graph_without_starting_vertices_graph_is_cyclic);
-            return true;
-        }
-
-        enum VisitStep {
-            VertexChild(Vertex),
-            OutOfVertexChildren, // this marker is used as an indicator when to pop from the visitation stack
-        }
-
-        let mut visited = RoaringBitmap::new();
-        while let Some(starting_vertex) = starting_vertices.pop() {
-            let mut to_visit: Vec<VisitStep> = vec![VisitStep::VertexChild(starting_vertex)];
-            let mut path: Vec<Vertex> = Default::default();
-            while let Some(vertex) = to_visit.pop() {
-                match vertex {
-                    VisitStep::VertexChild(vertex) => {
-                        if path.contains(&vertex) {
-                            // We have a cycle
-                            return true;
-                        }
-                        if visited.contains(vertex.into()) {
-                            // We have something homeomorphic to a diamond
-                            continue;
-                        }
-                        path.push(vertex);
-                        to_visit.push(VisitStep::OutOfVertexChildren);
-                        let mut children: Vec<Vertex> = Default::default();
-                        self.extend_with_children(&mut children, vertex);
-                        for child in children {
-                            to_visit.push(VisitStep::VertexChild(child));
-                        }
-                        visited.insert(vertex.into());
-                    }
-                    VisitStep::OutOfVertexChildren => {
-                        path.pop().unwrap();
-                    }
-                };
-            }
-        }
-        false
-    }
-
     /// Visit all vertices reachable from `vertex` in a depth-first-search (DFS)
     /// order.
     pub fn iter_descendants_dfs(&self, start_vertex: Vertex) -> Box<dyn Iterator<Item = Vertex> + '_> {
@@ -227,8 +184,31 @@ impl DirectedGraph {
         Box::new(iter)
     }
 
-    /// Returns a set "seed" vertices of a DAG from which a traversal may start so
-    /// that the process covers all vertices in the graph.
+    /// Visit all vertices of a DAG in a depth-first-search postorder, i.e. emitting
+    /// vertices only after all their descendants have been emitted first.
+    pub fn iter_vertices_dfs_post_order(&self, start_vertices: &[Vertex]) -> Box<dyn Iterator<Item = Vertex> + '_> {
+        let iter = DfsPostOrderVerticesIterator {
+            digraph: self,
+            visited: RoaringBitmap::new(),
+            to_visit: start_vertices.to_vec(),
+        };
+        Box::new(iter)
+    }
+
+    /// Visit nodes in a depth-first-search (DFS) emitting edges in postorder, i.e.
+    /// each node is emitted only after all its descendants have been emitted.
+    pub fn iter_edges_dfs_post_order(&self, start_vertices: &[Vertex]) -> Box<dyn Iterator<Item = (Vertex, Vertex)> + '_> {
+        let iter = DfsPostOrderEdgesIterator {
+            digraph: self,
+            inner: self.iter_vertices_dfs_post_order(start_vertices),
+            seen_vertices: RoaringBitmap::new(),
+            buffer: Default::default(),
+        };
+        Box::new(iter)
+    }
+
+    /// Returns "seed" vertices of a DAG from which a traversal may start so that the process
+    /// covers all vertices in the graph.
     pub fn get_vertices_without_incoming_edges(&self) -> Vec<Vertex> {
         let incoming_edges_count = {
             let mut incoming_edges_count: Vec<Vertex> =
@@ -249,8 +229,65 @@ impl DirectedGraph {
         vertices_without_incoming_edges
     }
 
+    /// Return either an `Ok()` containing a sequence of topologically ordered vertices of a
+    /// digraph, or an `Err()`, containing a cycle in the digraph, in which case the topological
+    /// order does not exist.
+    pub fn get_topologically_ordered_vertices(&self) -> Result<Vec<Vertex>, Vec<Vertex>> {
+        let mut starting_vertices = self.get_vertices_without_incoming_edges();
+        if starting_vertices.is_empty() && self.has_edges() {
+            // If there are no vertices without incoming edges and yet there are some edges in the
+            // graph, we have a highly cyclic graph.
+            cov_mark::hit!(nonempty_graph_without_starting_vertices_graph_is_cyclic);
+
+            // Pick any vertex as a starting point so that the traversal below returns *any* cycle
+            // as an error.
+            let (any_vertex, _) = self.iter_edges().next().unwrap();
+            starting_vertices.push(any_vertex);
+        }
+
+        #[derive(Debug, Clone, Copy)]
+        enum VisitStep {
+            VertexChild(Vertex),
+            OutOfVertexChildren(Vertex), // this marker is used as an indicator when to pop from the visitation stack
+        }
+
+        let mut result: Vec<Vertex> = Default::default();
+        let mut visited = RoaringBitmap::new();
+        while let Some(starting_vertex) = starting_vertices.pop() {
+            let mut to_visit: Vec<VisitStep> = vec![VisitStep::VertexChild(starting_vertex)];
+            let mut path: Vec<Vertex> = Default::default();
+            while let Some(vertex) = to_visit.pop() {
+                match vertex {
+                    VisitStep::VertexChild(vertex) => {
+                        if path.contains(&vertex) {
+                            // We have a cycle
+                            return Err(path);
+                        }
+                        if visited.contains(vertex.into()) {
+                            // We have something homeomorphic to a diamond
+                            continue;
+                        }
+                        path.push(vertex);
+                        to_visit.push(VisitStep::OutOfVertexChildren(vertex));
+                        let mut children: Vec<Vertex> = Default::default();
+                        self.extend_with_children(&mut children, vertex);
+                        for child in children {
+                            to_visit.push(VisitStep::VertexChild(child));
+                        }
+                        visited.insert(vertex.into());
+                    }
+                    VisitStep::OutOfVertexChildren(vertex) => {
+                        path.pop().unwrap();
+                        result.push(vertex);
+                    }
+                };
+            }
+        }
+        Ok(result)
+    }
+
     /// Computes a mapping: vertex -> set of vertices that are descendants of vertex.
-    pub fn get_descendants(&self) -> Vec<RoaringBitmap> {
+    fn get_descendants(&self) -> Vec<RoaringBitmap> {
         let mut descendants: Vec<RoaringBitmap> =
             vec![RoaringBitmap::default(); self.get_vertex_count().into()];
 
@@ -285,39 +322,11 @@ impl DirectedGraph {
                     if w == v {
                         continue;
                     }
-                    result.set_edge(u, w, false);
+                    result.clear_edge(u, w);
                 }
             }
         }
         result
-    }
-
-    /// Visit all vertices of a DAG in a depth-first-search postorder, i.e. emitting
-    /// vertices only after all their descendants have been emitted first.
-    pub fn iter_vertices_dfs_post_order(&self) -> Box<dyn Iterator<Item = Vertex> + '_> {
-        let iter = DfsPostOrderVerticesIterator {
-            digraph: self,
-            visited: RoaringBitmap::new(),
-            to_visit: self.get_vertices_without_incoming_edges(),
-        };
-        Box::new(iter)
-    }
-
-    /// Visit nodes in a depth-first-search (DFS) emitting edges in postorder, i.e.
-    /// each node after all its descendants have been emitted.
-    ///
-    /// Note that when a DAG represents a [partially ordered
-    /// set](https://en.wikipedia.org/wiki/Partially_ordered_set), this function iterates over pairs of
-    /// that poset.  It may be necessary to first compute either a [`Self::transitive_reduction`] of a
-    /// DAG, to only get the minimal set of pairs spanning the entire poset.
-    pub fn iter_edges_dfs_post_order(&self) -> Box<dyn Iterator<Item = (Vertex, Vertex)> + '_> {
-        let iter = DfsPostOrderEdgesIterator {
-            digraph: self,
-            inner: self.iter_vertices_dfs_post_order(),
-            seen_vertices: RoaringBitmap::new(),
-            buffer: Default::default(),
-        };
-        Box::new(iter)
     }
 
     /// Outputs the DAG in the [Graphviz DOT](https://graphviz.org/) format.
@@ -542,27 +551,27 @@ mod tests {
     #[test]
     fn empty_graph_has_no_cycle() {
         let digraph = DirectedGraph::from_edges_iter(1, vec![].into_iter());
-        assert!(!digraph.has_cycle());
+        assert!(digraph.get_topologically_ordered_vertices().is_ok());
     }
 
     #[test]
     fn diamond_has_no_cycle() {
         let diamond =
             DirectedGraph::from_edges_iter(4, vec![(0, 1), (0, 2), (1, 3), (2, 3)].into_iter());
-        assert!(!diamond.has_cycle());
+        assert!(diamond.get_topologically_ordered_vertices().is_ok());
     }
 
     #[test]
     fn simple_cyclic_digraph_has_cycle() {
         let digraph = DirectedGraph::from_edges_iter(2, vec![(0, 1), (1, 0)].into_iter());
         cov_mark::check!(nonempty_graph_without_starting_vertices_graph_is_cyclic);
-        assert!(digraph.has_cycle());
+        assert!(digraph.get_topologically_ordered_vertices().is_err());
     }
 
     #[test]
     fn triangle_has_cycle() {
         let digraph = DirectedGraph::from_edges_iter(3, vec![(0, 1), (1, 2), (2, 0)].into_iter());
-        assert!(digraph.has_cycle());
+        assert!(digraph.get_topologically_ordered_vertices().is_err());
     }
 
     proptest! {
@@ -573,13 +582,23 @@ mod tests {
 
         #[test]
         fn arb_tree_has_no_cycle(tree in arb_tree(100)) {
-            prop_assert!(!tree.has_cycle());
+            prop_assert!(tree.get_topologically_ordered_vertices().is_ok());
         }
 
         #[test]
         fn arb_dag_has_no_cycle(dag in arb_dag(100)) {
             let digraph = DirectedGraph::from_dag(&dag);
-            prop_assert!(!digraph.has_cycle());
+            prop_assert!(digraph.get_topologically_ordered_vertices().is_ok());
         }
+    }
+
+    #[test]
+    fn simple_topological_order() {
+        // 0: 1, 2, 3, 4
+        // 1: 3
+        // 2: 3, 4
+        // 3: 4
+        let digraph = DirectedGraph::from_edges_iter(5, [(0, 1), (0, 2), (0, 3), (0, 4), (1, 3), (2, 3), (2, 4), (3, 4)].into_iter());
+        assert_eq!(digraph.get_topologically_ordered_vertices().unwrap(), [4, 3, 2, 1, 0]);
     }
 }
