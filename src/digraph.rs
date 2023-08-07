@@ -230,20 +230,15 @@ impl DirectedGraph {
         vertices_without_incoming_edges
     }
 
-    /// Return either an `Ok()` containing a sequence of topologically ordered vertices of a
-    /// digraph, or an `Err()`, containing a cycle in the digraph, in which case the topological
-    /// order does not exist.
-    pub fn get_topologically_ordered_vertices(&self) -> Result<Vec<Vertex>, Vec<Vertex>> {
+    /// Return a sequence of topologically ordered vertices of a digraph, or `None` if the digraph
+    /// has a cycle.
+    pub fn get_topologically_ordered_vertices(&self) -> Option<Vec<Vertex>> {
         let mut starting_vertices = self.get_vertices_without_incoming_edges();
         if starting_vertices.is_empty() && self.has_edges() {
             // If there are no vertices without incoming edges and yet there are some edges in the
             // graph, we have a highly cyclic graph.
             cov_mark::hit!(nonempty_graph_without_starting_vertices_graph_is_cyclic);
-
-            // Pick any vertex as a starting point so that the traversal below returns *any* cycle
-            // as an error.
-            let (any_vertex, _) = self.iter_edges().next().unwrap();
-            starting_vertices.push(any_vertex);
+            return None;
         }
 
         #[derive(Debug, Clone, Copy)]
@@ -256,19 +251,19 @@ impl DirectedGraph {
         let mut visited = RoaringBitmap::new();
         while let Some(starting_vertex) = starting_vertices.pop() {
             let mut to_visit: Vec<VisitStep> = vec![VisitStep::VertexChild(starting_vertex)];
-            let mut path: Vec<Vertex> = Default::default();
+            let mut marked = RoaringBitmap::new();
             while let Some(vertex) = to_visit.pop() {
                 match vertex {
                     VisitStep::VertexChild(vertex) => {
-                        if path.contains(&vertex) {
+                        if marked.contains(vertex.into()) {
                             // We have a cycle
-                            return Err(path);
+                            return None;
                         }
                         if visited.contains(vertex.into()) {
                             // We have something homeomorphic to a diamond
                             continue;
                         }
-                        path.push(vertex);
+                        marked.insert(vertex.into());
                         to_visit.push(VisitStep::OutOfVertexChildren(vertex));
                         let mut children: Vec<Vertex> = Default::default();
                         self.extend_with_children(vertex, &mut children);
@@ -278,13 +273,14 @@ impl DirectedGraph {
                         visited.insert(vertex.into());
                     }
                     VisitStep::OutOfVertexChildren(vertex) => {
-                        path.pop().unwrap();
+                        marked.remove(vertex.into());
                         result.push(vertex);
                     }
                 };
             }
         }
-        Ok(result)
+        result.reverse();
+        Some(result)
     }
 
     /// Computes a mapping: vertex -> set of vertices that are descendants of vertex.
@@ -552,27 +548,27 @@ mod tests {
     #[test]
     fn empty_graph_has_no_cycle() {
         let digraph = DirectedGraph::from_edges_iter(1, vec![].into_iter());
-        assert!(digraph.get_topologically_ordered_vertices().is_ok());
+        assert_eq!(digraph.get_topologically_ordered_vertices().unwrap(), [0]);
     }
 
     #[test]
     fn diamond_has_no_cycle() {
         let diamond =
             DirectedGraph::from_edges_iter(4, vec![(0, 1), (0, 2), (1, 3), (2, 3)].into_iter());
-        assert!(diamond.get_topologically_ordered_vertices().is_ok());
+        assert_eq!(diamond.get_topologically_ordered_vertices().unwrap(), [0, 1, 2, 3]);
     }
 
     #[test]
     fn simple_cyclic_digraph_has_cycle() {
         let digraph = DirectedGraph::from_edges_iter(2, vec![(0, 1), (1, 0)].into_iter());
         cov_mark::check!(nonempty_graph_without_starting_vertices_graph_is_cyclic);
-        assert!(digraph.get_topologically_ordered_vertices().is_err());
+        assert!(digraph.get_topologically_ordered_vertices().is_none());
     }
 
     #[test]
     fn triangle_has_cycle() {
         let digraph = DirectedGraph::from_edges_iter(3, vec![(0, 1), (1, 2), (2, 0)].into_iter());
-        assert!(digraph.get_topologically_ordered_vertices().is_err());
+        assert!(digraph.get_topologically_ordered_vertices().is_none());
     }
 
     proptest! {
@@ -583,13 +579,13 @@ mod tests {
 
         #[test]
         fn arb_tree_has_no_cycle(tree in arb_tree(100)) {
-            prop_assert!(tree.get_topologically_ordered_vertices().is_ok());
+            prop_assert!(tree.get_topologically_ordered_vertices().is_some());
         }
 
         #[test]
         fn arb_dag_has_no_cycle(dag in arb_dag(100)) {
             let digraph = DirectedGraph::from_dag(&dag);
-            prop_assert!(digraph.get_topologically_ordered_vertices().is_ok());
+            prop_assert!(digraph.get_topologically_ordered_vertices().is_some());
         }
     }
 
@@ -600,6 +596,6 @@ mod tests {
         // 2: 3, 4
         // 3: 4
         let digraph = DirectedGraph::from_edges_iter(5, [(0, 1), (0, 2), (0, 3), (0, 4), (1, 3), (2, 3), (2, 4), (3, 4)].into_iter());
-        assert_eq!(digraph.get_topologically_ordered_vertices().unwrap(), [4, 3, 2, 1, 0]);
+        assert_eq!(digraph.get_topologically_ordered_vertices().unwrap(), [0, 1, 2, 3, 4]);
     }
 }
