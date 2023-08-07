@@ -51,7 +51,8 @@ fn row_column_from_index(index: BitmapIndex, size: Vertex) -> (Vertex, Vertex) {
 }
 
 impl DirectedGraph {
-    pub fn empty(vertex_count: Vertex) -> Self {
+    /// Constructs a new graph without any edges having at most `vertex_count` vertices.
+    pub fn new(vertex_count: Vertex) -> Self {
         Self {
             vertex_count,
             adjacency_matrix: RoaringBitmap::new(),
@@ -356,7 +357,7 @@ pub fn random_tree_from_prufer_sequence(prufer_sequence: &[Vertex]) -> DirectedG
     let mut degree: Vec<Vertex> = Vec::with_capacity(nvertices);
     degree.resize(nvertices, 1);
 
-    let mut tree = DirectedGraph::empty(nvertices.try_into().unwrap());
+    let mut tree = DirectedGraph::new(nvertices.try_into().unwrap());
 
     // Number of occurrences of vertex in code
     for i in prufer_sequence {
@@ -408,7 +409,7 @@ pub fn arb_nonempty_tree(max_vertex_count: Vertex) -> BoxedStrategy<DirectedGrap
 
 pub fn arb_tree(max_vertex_count: Vertex) -> BoxedStrategy<DirectedGraph> {
     prop_oneof![
-        1 => Just(DirectedGraph::empty(max_vertex_count)).boxed(),
+        1 => Just(DirectedGraph::new(max_vertex_count)).boxed(),
         99 => arb_nonempty_tree(max_vertex_count),
     ]
     .boxed()

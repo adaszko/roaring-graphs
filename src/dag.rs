@@ -40,7 +40,7 @@
 //!
 //! # Entry points
 //!
-//! See either [`DirectedAcyclicGraph::empty`],
+//! See either [`DirectedAcyclicGraph::new`],
 //! [`DirectedAcyclicGraph::from_edges_iter`], or
 //! [`DirectedAcyclicGraph::from_adjacency_matrix`] for the "entry point" to
 //! this crate.
@@ -87,7 +87,8 @@ impl TraversableDirectedGraph for DirectedAcyclicGraph {
 }
 
 impl DirectedAcyclicGraph {
-    pub fn empty(vertex_count: Vertex) -> Self {
+    /// Constructs a new graph without any edges having at most `vertex_count` vertices.
+    pub fn new(vertex_count: Vertex) -> Self {
         Self {
             adjacency_matrix: StrictlyUpperTriangularLogicalMatrix::zeroed(vertex_count),
         }
@@ -402,7 +403,7 @@ impl DirectedAcyclicGraph {
 }
 
 pub fn arb_dag(max_vertex_count: Vertex) -> BoxedStrategy<DirectedAcyclicGraph> {
-    let empty = Just(DirectedAcyclicGraph::empty(max_vertex_count)).boxed();
+    let empty = Just(DirectedAcyclicGraph::new(max_vertex_count)).boxed();
     let nontrivial = (1..max_vertex_count)
         .prop_flat_map(|vertex_count| {
             let max_edges_count =
@@ -461,7 +462,7 @@ mod tests {
     #[test]
     #[should_panic = "assertion failed: u < v"]
     fn negative_test_smallest_dag() {
-        let mut dag = DirectedAcyclicGraph::empty(2);
+        let mut dag = DirectedAcyclicGraph::new(2);
         assert_eq!(dag.get_edge(0, 0), false);
         dag.set_edge(0, 0);
     }
