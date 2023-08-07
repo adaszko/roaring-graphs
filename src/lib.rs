@@ -5,8 +5,8 @@ pub mod strictly_upper_triangular_logical_matrix;
 pub type Vertex = u16;
 
 trait TraversableDirectedGraph {
-    fn extend_with_children(&self, children: &mut Vec<Vertex>, u: Vertex);
-    fn extend_with_parents(&self, parents: &mut Vec<Vertex>, v: Vertex);
+    fn extend_with_children(&self, u: Vertex, children: &mut Vec<Vertex>);
+    fn extend_with_parents(&self, v: Vertex, parents: &mut Vec<Vertex>);
 }
 
 pub use dag::{arb_dag, DirectedAcyclicGraph};

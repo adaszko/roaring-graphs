@@ -9,6 +9,7 @@ use crate::{dag::DirectedAcyclicGraph, TraversableDirectedGraph, Vertex};
 
 pub type BitmapIndex = u32;
 
+/// A mutable, single-threaded directed graph.
 #[derive(Clone)]
 pub struct DirectedGraph {
     vertex_count: Vertex,
@@ -29,12 +30,12 @@ impl std::fmt::Debug for DirectedGraph {
 }
 
 impl TraversableDirectedGraph for DirectedGraph {
-    fn extend_with_children(&self, children: &mut Vec<Vertex>, u: Vertex) {
-        self.extend_with_children(children, u)
+    fn extend_with_children(&self, u: Vertex, children: &mut Vec<Vertex>) {
+        self.extend_with_children(u, children)
     }
 
-    fn extend_with_parents(&self, parents: &mut Vec<Vertex>, v: Vertex) {
-        self.extend_with_parents(parents, v)
+    fn extend_with_parents(&self, v: Vertex, parents: &mut Vec<Vertex>) {
+        self.extend_with_parents(v, parents)
     }
 }
 
@@ -124,7 +125,7 @@ impl DirectedGraph {
         self.adjacency_matrix.remove(index);
     }
 
-    /// Returns None if the graph has more than connected component or there's no root.
+    /// Returns `None` if the graph has more than connected component or there's no root.
     pub fn find_tree_root(&self) -> Option<Vertex> {
         let mut candidates = RoaringBitmap::new();
         candidates.insert_range(0..u32::from(self.vertex_count));
@@ -138,8 +139,8 @@ impl DirectedGraph {
         Some(root)
     }
 
-    /// Iterates over vertices `v` such that there's an edge `(u, v)` in the graph.
-    pub fn extend_with_children(&self, children: &mut Vec<Vertex>, u: Vertex) {
+    /// Pushes vertices `v` at the end of `children` such that there's an edge `(u, v)` in the graph.
+    pub fn extend_with_children(&self, u: Vertex, children: &mut Vec<Vertex>) {
         assert!(u < self.vertex_count);
         let mut index = u * self.vertex_count;
         for v in 0..self.vertex_count {
@@ -150,8 +151,8 @@ impl DirectedGraph {
         }
     }
 
-    /// Iterates over vertices `u` such that there's an edge `(u, v)` in the graph.
-    pub fn extend_with_parents(&self, parents: &mut Vec<Vertex>, v: Vertex) {
+    /// Pushes vertices `u` at the end of `parents` such that there's an edge `(u, v)` in the graph.
+    pub fn extend_with_parents(&self, v: Vertex, parents: &mut Vec<Vertex>) {
         assert!(v < self.vertex_count);
         let mut index = v;
         for u in 0..self.vertex_count {
@@ -270,7 +271,7 @@ impl DirectedGraph {
                         path.push(vertex);
                         to_visit.push(VisitStep::OutOfVertexChildren(vertex));
                         let mut children: Vec<Vertex> = Default::default();
-                        self.extend_with_children(&mut children, vertex);
+                        self.extend_with_children(vertex, &mut children);
                         for child in children {
                             to_visit.push(VisitStep::VertexChild(child));
                         }
@@ -294,7 +295,7 @@ impl DirectedGraph {
         let mut children = Vec::with_capacity(self.get_vertex_count().into());
         for u in (0..self.get_vertex_count()).rev() {
             children.clear();
-            self.extend_with_children(&mut children, u);
+            self.extend_with_children(u, &mut children);
             let mut u_descendants = RoaringBitmap::default();
             for &v in &children {
                 u_descendants |= descendants[usize::try_from(v).unwrap()].clone();
@@ -315,7 +316,7 @@ impl DirectedGraph {
         let descendants = self.get_descendants();
         for u in 0..self.get_vertex_count() {
             children.clear();
-            self.extend_with_children(&mut children, u);
+            self.extend_with_children(u, &mut children);
             for &v in &children {
                 for w in descendants[usize::from(v)].iter() {
                     let w = Vertex::try_from(w).unwrap();
@@ -443,7 +444,7 @@ impl<'a, G: TraversableDirectedGraph> Iterator for DfsDescendantsIterator<'a, G>
             if self.visited.contains(u.into()) {
                 continue;
             }
-            self.digraph.extend_with_children(&mut self.to_visit, u);
+            self.digraph.extend_with_children(u, &mut self.to_visit);
             self.visited.insert(u.into());
             return Some(u);
         }
@@ -465,7 +466,7 @@ impl<'a, G: TraversableDirectedGraph> Iterator for DfsAncestorsIterator<'a, G> {
             if self.visited.contains(u.into()) {
                 continue;
             }
-            self.digraph.extend_with_parents(&mut self.to_visit, u);
+            self.digraph.extend_with_parents(u, &mut self.to_visit);
             self.visited.insert(u.into());
             return Some(u);
         }
@@ -495,7 +496,7 @@ impl<'a, G: TraversableDirectedGraph> Iterator for DfsPostOrderVerticesIterator<
             }
             let unvisited_neighbours: Vec<Vertex> = {
                 let mut neighbours: Vec<Vertex> = Default::default();
-                self.digraph.extend_with_children(&mut neighbours, u);
+                self.digraph.extend_with_children(u, &mut neighbours);
                 neighbours.retain(|v| !self.visited.contains((*v).into()));
                 neighbours
             };
@@ -531,7 +532,7 @@ impl<'a, G: TraversableDirectedGraph> Iterator for DfsPostOrderEdgesIterator<'a,
             let u = self.inner.next()?;
 
             let mut children: Vec<Vertex> = Default::default();
-            self.digraph.extend_with_children(&mut children, u);
+            self.digraph.extend_with_children(u, &mut children);
             for v in children {
                 if self.seen_vertices.contains(v.into()) {
                     self.buffer.push_back((u, v));

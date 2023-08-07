@@ -77,12 +77,12 @@ impl std::fmt::Debug for DirectedAcyclicGraph {
 }
 
 impl TraversableDirectedGraph for DirectedAcyclicGraph {
-    fn extend_with_children(&self, children: &mut Vec<Vertex>, u: Vertex) {
-        self.extend_with_children(children, u)
+    fn extend_with_children(&self, u: Vertex, children: &mut Vec<Vertex>) {
+        self.extend_with_children(u, children)
     }
 
-    fn extend_with_parents(&self, parents: &mut Vec<Vertex>, v: Vertex) {
-        self.extend_with_parents(parents, v)
+    fn extend_with_parents(&self, v: Vertex, parents: &mut Vec<Vertex>) {
+        self.extend_with_parents(v, parents)
     }
 }
 
@@ -172,11 +172,11 @@ impl DirectedAcyclicGraph {
         self.adjacency_matrix.iter_ones_at_row(u)
     }
 
-    pub fn extend_with_children(&self, children: &mut Vec<Vertex>, u: Vertex) {
+    pub fn extend_with_children(&self, u: Vertex, children: &mut Vec<Vertex>) {
         children.extend(self.adjacency_matrix.iter_ones_at_row(u))
     }
 
-    pub fn extend_with_parents(&self, parents: &mut Vec<Vertex>, v: Vertex) {
+    pub fn extend_with_parents(&self, v: Vertex, parents: &mut Vec<Vertex>) {
         parents.extend(self.adjacency_matrix.iter_ones_at_column(v))
     }
 
