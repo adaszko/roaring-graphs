@@ -161,14 +161,6 @@ impl DirectedAcyclicGraph {
         self.adjacency_matrix.clear(u, v);
     }
 
-    /// Requires `u < v`.  Panics otherwise.
-    pub fn set_edge_to(&mut self, u: Vertex, v: Vertex, exists: bool) {
-        assert!(u < self.get_vertex_count());
-        assert!(v < self.get_vertex_count());
-        assert!(u < v);
-        self.adjacency_matrix.set_to(u, v, exists);
-    }
-
     pub fn iter_edges(&self) -> impl Iterator<Item = (Vertex, Vertex)> + '_ {
         self.adjacency_matrix.iter_ones()
     }

@@ -104,16 +104,20 @@ impl DirectedGraph {
         self.adjacency_matrix.contains(index)
     }
 
-    pub fn set_edge(&mut self, parent: Vertex, child: Vertex, exists: bool) {
+    pub fn set_edge(&mut self, parent: Vertex, child: Vertex) {
         assert_ne!(parent, child);
         assert!(parent < self.get_vertex_count());
         assert!(child < self.get_vertex_count());
         let index = self.index_from_row_column(parent, child);
-        if exists {
-            self.adjacency_matrix.insert(index);
-        } else {
-            self.adjacency_matrix.remove(index);
-        }
+        self.adjacency_matrix.insert(index);
+    }
+
+    pub fn clear_edge(&mut self, parent: Vertex, child: Vertex) {
+        assert_ne!(parent, child);
+        assert!(parent < self.get_vertex_count());
+        assert!(child < self.get_vertex_count());
+        let index = self.index_from_row_column(parent, child);
+        self.adjacency_matrix.remove(index);
     }
 
     // Returns None if the graph has more than connected component or there's no root.
@@ -368,7 +372,7 @@ pub fn random_tree_from_prufer_sequence(prufer_sequence: &[Vertex]) -> DirectedG
     for i in prufer_sequence {
         for j in 0..nvertices {
             if degree[j] == 1 {
-                tree.set_edge(*i, Vertex::try_from(j).unwrap(), true);
+                tree.set_edge(*i, Vertex::try_from(j).unwrap());
                 degree[usize::try_from(*i).unwrap()] -= 1;
                 degree[j] -= 1;
                 break;
@@ -391,7 +395,7 @@ pub fn random_tree_from_prufer_sequence(prufer_sequence: &[Vertex]) -> DirectedG
         }
         (u.unwrap(), v.unwrap())
     };
-    tree.set_edge(u, v, true);
+    tree.set_edge(u, v);
 
     tree
 }
