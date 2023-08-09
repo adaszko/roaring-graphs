@@ -1,4 +1,5 @@
 pub mod dag;
+pub mod delta_debugging_bitmap;
 pub mod digraph;
 pub mod strictly_upper_triangular_logical_matrix;
 

@@ -1,4 +1,4 @@
-use roaring::{RoaringBitmap, MultiOps};
+use roaring::{MultiOps, RoaringBitmap};
 
 #[inline]
 pub fn strictly_upper_triangular_matrix_capacity(n: u16) -> u32 {
@@ -26,6 +26,9 @@ impl<'a> Iterator for RowColumnIterator {
     type Item = (u16, u16);
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.size == 0 {
+            return None;
+        }
         let result = (self.i, self.j);
         if self.j < self.size - 1 {
             self.j += 1;
@@ -47,6 +50,22 @@ impl<'a> Iterator for RowColumnIterator {
 pub struct StrictlyUpperTriangularLogicalMatrix {
     size: u16,
     matrix: RoaringBitmap,
+}
+
+impl Eq for StrictlyUpperTriangularLogicalMatrix {}
+
+impl PartialEq for StrictlyUpperTriangularLogicalMatrix {
+    fn eq(&self, other: &Self) -> bool {
+        if self.size != other.size {
+            return false;
+        }
+        for (r, c) in RowColumnIterator::new(self.size) {
+            if self.get(r, c) != other.get(r, c) {
+                return false;
+            }
+        }
+        true
+    }
 }
 
 // Reference: https://www.intel.com/content/www/us/en/develop/documentation/onemkl-developer-reference-c/top/lapack-routines/matrix-storage-schemes-for-lapack-routines.html
