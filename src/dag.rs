@@ -410,9 +410,35 @@ pub struct UniformEdgeProbabilityStrategy {
 #[derive(Debug)]
 pub struct DirectedAcyclicGraphValueTree {
     vertex_count: u16,
-    vertex_mask_tree: DeltaDebuggingBitmapValueTree,
-    edge_bitmap_tree: DeltaDebuggingBitmapValueTree,
-    start_simplifying_edges: bool,
+    state: ReductionState,
+}
+
+#[derive(Debug)]
+enum ReductionState {
+    ReduceVertices {
+        vertex_mask_tree: DeltaDebuggingBitmapValueTree,
+        edge_bitmap: RoaringBitmap,
+    },
+    ReduceEdges {
+        vertex_mask: RoaringBitmap,
+        edge_bitmap_tree: DeltaDebuggingBitmapValueTree,
+    }
+}
+
+impl ReductionState {
+    fn current_vertex_mask(&self) -> RoaringBitmap {
+        match self {
+            Self::ReduceVertices { vertex_mask_tree, .. } => vertex_mask_tree.current(),
+            Self::ReduceEdges { vertex_mask, .. } => vertex_mask.clone(),
+        }
+    }
+
+    fn current_edge_bitmap(&self) -> RoaringBitmap {
+        match self {
+            Self::ReduceVertices { edge_bitmap, .. } => edge_bitmap.clone(),
+            Self::ReduceEdges { edge_bitmap_tree, .. } => edge_bitmap_tree.current(),
+        }
+    }
 }
 
 impl Strategy for UniformEdgeProbabilityStrategy {
@@ -440,15 +466,16 @@ impl Strategy for UniformEdgeProbabilityStrategy {
             Uniform::new(self.vertex_count.start, self.vertex_count.end - 1).sample(runner.rng());
         let bitmap_size = strictly_upper_triangular_matrix_capacity(vertex_count);
         let iter = (0..bitmap_size as u32).filter(|_| runner.rng().gen_bool(self.edge_probability));
-        let bitmap =
+        let edge_bitmap =
             RoaringBitmap::from_sorted_iter(iter).map_err(|e| Reason::from(e.to_string()))?;
         let vertex_mask = RoaringBitmap::from_sorted_iter(0..vertex_count as u32).unwrap();
 
         Ok(DirectedAcyclicGraphValueTree {
             vertex_count,
-            vertex_mask_tree: DeltaDebuggingBitmapValueTree::new(vertex_mask),
-            edge_bitmap_tree: DeltaDebuggingBitmapValueTree::new(bitmap),
-            start_simplifying_edges: false,
+            state: ReductionState::ReduceVertices {
+                vertex_mask_tree: DeltaDebuggingBitmapValueTree::new(vertex_mask),
+                edge_bitmap
+            }
         })
     }
 }
@@ -457,8 +484,8 @@ impl ValueTree for DirectedAcyclicGraphValueTree {
     type Value = DirectedAcyclicGraph;
 
     fn current(&self) -> Self::Value {
-        let edge_map = self.edge_bitmap_tree.current();
-        let vertex_mask = self.vertex_mask_tree.current();
+        let vertex_mask = self.state.current_vertex_mask();
+        let edge_map = self.state.current_edge_bitmap();
 
         let mut from_dst = 0 as Vertex;
         let mut edges = Vec::with_capacity(strictly_upper_triangular_matrix_capacity(
@@ -490,24 +517,32 @@ impl ValueTree for DirectedAcyclicGraphValueTree {
     }
 
     fn simplify(&mut self) -> bool {
-        if self.start_simplifying_edges {
-            self.edge_bitmap_tree.simplify()
-        } else {
-            if !self.vertex_mask_tree.simplify() {
-                self.start_simplifying_edges = true;
-            }
-            true
+        match &mut self.state {
+            ReductionState::ReduceVertices { vertex_mask_tree, edge_bitmap } => {
+                if !vertex_mask_tree.simplify() {
+                    self.state = ReductionState::ReduceEdges {
+                        vertex_mask: vertex_mask_tree.current(),
+                        edge_bitmap_tree: DeltaDebuggingBitmapValueTree::new(edge_bitmap.clone()),
+                    };
+                }
+                true
+            },
+            ReductionState::ReduceEdges { edge_bitmap_tree, .. } => edge_bitmap_tree.simplify(),
         }
     }
 
     fn complicate(&mut self) -> bool {
-        if self.start_simplifying_edges {
-            self.edge_bitmap_tree.complicate()
-        } else {
-            if !self.vertex_mask_tree.complicate() {
-                self.start_simplifying_edges = true;
-            }
-            true
+        match &mut self.state {
+            ReductionState::ReduceVertices { vertex_mask_tree, edge_bitmap } => {
+                if !vertex_mask_tree.complicate() {
+                    self.state = ReductionState::ReduceEdges {
+                        vertex_mask: vertex_mask_tree.current(),
+                        edge_bitmap_tree: DeltaDebuggingBitmapValueTree::new(edge_bitmap.clone()),
+                    };
+                }
+                true
+            },
+            ReductionState::ReduceEdges { edge_bitmap_tree, .. } => edge_bitmap_tree.complicate(),
         }
     }
 }
@@ -890,9 +925,10 @@ mod tests {
 
         let full_graph_tree = DirectedAcyclicGraphValueTree {
             vertex_count,
-            edge_bitmap_tree: DeltaDebuggingBitmapValueTree::new(edge_bitmap),
-            vertex_mask_tree: DeltaDebuggingBitmapValueTree::new(vertex_mask),
-            start_simplifying_edges: false,
+            state: ReductionState::ReduceVertices {
+                vertex_mask_tree: DeltaDebuggingBitmapValueTree::new(vertex_mask),
+                edge_bitmap,
+            },
         };
 
         let mut runner = TestRunner::new(Default::default());
