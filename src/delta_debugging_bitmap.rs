@@ -10,29 +10,22 @@ use std::{
 };
 
 #[derive(Debug, Clone)]
-pub struct DeltaDebuggingBitmapStrategy {
+pub struct UniformBitProbabilityStrategy {
     size: Range<u32>,
     ones_probability: f64,
 }
 
-pub fn arb_bitmap_uniform(size: impl Into<Range<u32>>) -> DeltaDebuggingBitmapStrategy {
-    DeltaDebuggingBitmapStrategy {
-        size: size.into(),
-        ones_probability: 0.5,
-    }
-}
-
-pub fn arb_bitmap(
+pub fn arb_bitmap_uniform(
     size: impl Into<Range<u32>>,
     ones_probability: f64,
-) -> DeltaDebuggingBitmapStrategy {
-    DeltaDebuggingBitmapStrategy {
+) -> UniformBitProbabilityStrategy {
+    UniformBitProbabilityStrategy {
         size: size.into(),
         ones_probability,
     }
 }
 
-impl Strategy for DeltaDebuggingBitmapStrategy {
+impl Strategy for UniformBitProbabilityStrategy {
     type Tree = DeltaDebuggingBitmapValueTree;
 
     type Value = RoaringBitmap;

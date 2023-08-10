@@ -394,15 +394,17 @@ impl DirectedAcyclicGraph {
     }
 }
 
-pub fn arb_dag(vertex_count: impl Into<Range<Vertex>>) -> DirectedAcyclicGraphStrategy {
-    DirectedAcyclicGraphStrategy {
+pub fn arb_dag(vertex_count: impl Into<Range<Vertex>>, edge_probability: f64) -> UniformEdgeProbabilityStrategy {
+    UniformEdgeProbabilityStrategy {
         vertex_count: vertex_count.into(),
+        edge_probability,
     }
 }
 
 #[derive(Debug)]
-pub struct DirectedAcyclicGraphStrategy {
+pub struct UniformEdgeProbabilityStrategy {
     vertex_count: Range<Vertex>,
+    edge_probability: f64,
 }
 
 #[derive(Debug)]
@@ -413,7 +415,7 @@ pub struct DirectedAcyclicGraphValueTree {
     start_simplifying_edges: bool,
 }
 
-impl Strategy for DirectedAcyclicGraphStrategy {
+impl Strategy for UniformEdgeProbabilityStrategy {
     type Tree = DirectedAcyclicGraphValueTree;
 
     type Value = DirectedAcyclicGraph;
@@ -437,7 +439,7 @@ impl Strategy for DirectedAcyclicGraphStrategy {
         let vertex_count =
             Uniform::new(self.vertex_count.start, self.vertex_count.end - 1).sample(runner.rng());
         let bitmap_size = strictly_upper_triangular_matrix_capacity(vertex_count);
-        let iter = (0..bitmap_size as u32).filter(|_| runner.rng().gen_bool(0.5));
+        let iter = (0..bitmap_size as u32).filter(|_| runner.rng().gen_bool(self.edge_probability));
         let bitmap =
             RoaringBitmap::from_sorted_iter(iter).map_err(|e| Reason::from(e.to_string()))?;
         let vertex_mask = RoaringBitmap::from_sorted_iter(0..vertex_count as u32).unwrap();
@@ -610,7 +612,7 @@ mod tests {
     proptest! {
         // This mostly ensures `iter_edges()` really returns *all* the edges.
         #[test]
-        fn unblocking_preserves_transitivity(mut dag in arb_dag(0..25)) {
+        fn unblocking_preserves_transitivity(mut dag in arb_dag(0..25, 0.5)) {
             println!("{:?}", dag);
             let mut edges: Vec<(Vertex, Vertex)> = dag.iter_edges().collect();
             while let Some((left, right)) = edges.pop() {
@@ -794,7 +796,7 @@ mod tests {
     proptest! {
         #[test]
         fn prop_transitive_closure_and_transitive_reduction_intersection_equals_transitive_reduction_modulo_order(
-            dag in arb_dag(0..25),
+            dag in arb_dag(0..25, 0.5),
         ) {
             println!("{:?}", dag);
             let transitive_closure: HashSet<(Vertex, Vertex)> =
@@ -846,7 +848,7 @@ mod tests {
 
     proptest! {
         #[test]
-        fn traversals_equal_modulo_order(dag in arb_dag(0..25)) {
+        fn traversals_equal_modulo_order(dag in arb_dag(0..25, 0.5)) {
             let bfs: HashSet<Vertex> = dag.iter_vertices_bfs().collect();
             let dfs: HashSet<Vertex> = dag.iter_vertices_dfs().collect();
             let dfs_post_order: HashSet<Vertex> = dag.iter_vertices_dfs_post_order().collect();
