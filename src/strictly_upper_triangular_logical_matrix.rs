@@ -159,6 +159,10 @@ impl StrictlyUpperTriangularLogicalMatrix {
         let ones_indexes = [&self.matrix, &mask].intersection();
         ones_indexes.into_iter().map(|index| row_from_index(index, self.size))
     }
+
+    pub fn into_bitset(self) -> RoaringBitmap {
+        self.matrix
+    }
 }
 
 #[cfg(test)]

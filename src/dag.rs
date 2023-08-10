@@ -137,6 +137,17 @@ impl DirectedAcyclicGraph {
         Self { adjacency_matrix }
     }
 
+    /// Construct a fully connected DAG with given amount of vertices.
+    pub fn fully_connected(vertex_count: Vertex) -> Self {
+        let mut adjacency_matrix = StrictlyUpperTriangularLogicalMatrix::zeroed(vertex_count);
+        for i in 0..vertex_count {
+            for j in (i + 1)..vertex_count {
+                adjacency_matrix.set(i, j);
+            }
+        }
+        Self { adjacency_matrix }
+    }
+
     #[inline]
     pub fn get_vertex_count(&self) -> Vertex {
         self.adjacency_matrix.size()
@@ -920,11 +931,12 @@ mod tests {
 
         // We construct a fully-connected DAG of 10 vertices
         let vertex_count = 10;
-        let bitmap_size = strictly_upper_triangular_matrix_capacity(vertex_count);
-        let mut edge_bitmap = RoaringBitmap::new();
-        edge_bitmap.insert_range(0..bitmap_size);
-        let mut vertex_mask = RoaringBitmap::new();
-        vertex_mask.insert_range(0..vertex_count as u32);
+        let edge_bitmap = DirectedAcyclicGraph::fully_connected(vertex_count).adjacency_matrix.into_bitset();
+        let vertex_mask = {
+            let mut b = RoaringBitmap::new();
+            b.insert_range(0..vertex_count as u32);
+            b
+        };
 
         let full_graph_tree = DirectedAcyclicGraphValueTree {
             vertex_count,
