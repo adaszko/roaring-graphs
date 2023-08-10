@@ -73,7 +73,26 @@ pub struct DeltaDebuggingBitmapValueTree {
     upper: RoaringBitmap,
     split_into: u64,
     split_index: u64,
-    complement: bool,
+    subset: SubsetState,
+}
+
+#[derive(Debug, Eq, PartialEq)]
+enum SubsetState {
+    CheckSubset,
+    CheckSubsetComplement,
+}
+
+impl SubsetState {
+    fn is_inside(&self, index: u64, split_index: u64, split_width: u64) -> bool {
+        let split_start = split_width * split_index;
+        let split_end = split_start + split_width;
+        let inside_split = split_start <= index && index < split_end;
+
+        match self {
+            Self::CheckSubset => inside_split,
+            Self::CheckSubsetComplement => !inside_split,
+        }
+    }
 }
 
 impl DeltaDebuggingBitmapValueTree {
@@ -84,7 +103,7 @@ impl DeltaDebuggingBitmapValueTree {
             upper: bitmap,
             split_into: 1,
             split_index: 0,
-            complement: false,
+            subset: SubsetState::CheckSubset,
         }
     }
 }
@@ -97,17 +116,12 @@ impl ValueTree for DeltaDebuggingBitmapValueTree {
         let num_items = self.upper.len();
         let split_width = num_items / self.split_into;
 
-        let mut idx = 0;
-        for n in self.upper.iter() {
-            let split_start = split_width * self.split_index;
-            let split_end = split_start + split_width;
-            let in_current_split = split_start <= idx && idx < split_end;
+        for (i, n) in self.upper.iter().enumerate() {
+            let idx = i as u64;
 
-            if in_current_split ^ self.complement {
+            if self.subset.is_inside(idx, self.split_index, split_width) {
                 current.insert(n);
             }
-
-            idx += 1;
         }
 
         current
@@ -123,17 +137,21 @@ impl ValueTree for DeltaDebuggingBitmapValueTree {
 
         self.upper = self.current();
 
-        if self.complement {
-            // Successfully reduced to subset complement
-            self.split_into = max(self.split_into - 1, 2);
-            self.complement = false;
-        } else if self.split_into == 1 {
-            // We add a special case to test the empty set as early as possible
-            self.complement = true;
-        } else {
-            // Successfully reduced to subset
-            self.split_into = 2;
-            self.complement = false;
+        match self.subset {
+            SubsetState::CheckSubset => {
+                if self.split_into == 1 {
+                    // We add a special case to test the empty set as early as possible
+                    self.subset = SubsetState::CheckSubsetComplement;
+                } else {
+                    // Successfully reduced to subset
+                    self.split_into = 2;
+                }
+            }
+            SubsetState::CheckSubsetComplement => {
+                // Successfully reduced to subset complement
+                self.split_into = max(self.split_into - 1, 2);
+                self.subset = SubsetState::CheckSubset;
+            }
         }
         self.split_into = max(1, min(self.split_into, self.upper.len()));
         self.split_index = 0;
@@ -149,9 +167,20 @@ impl ValueTree for DeltaDebuggingBitmapValueTree {
         }
 
         self.split_index += 1;
-        if self.split_index >= self.split_into {
-            // we went through all split indices
-            if self.complement {
+        if self.split_index < self.split_into {
+            return true;
+        }
+
+        // we went through all split indices
+        match self.subset {
+            SubsetState::CheckSubset => {
+                // We went through all split indices once for all subsets.
+                // Checking all of the subsets' complements remains.
+                self.subset = SubsetState::CheckSubsetComplement;
+                self.split_index = 0;
+                true
+            }
+            SubsetState::CheckSubsetComplement => {
                 // We went through all split indices twice:
                 // Once for all subsets, then for all of their complements.
                 // We need to try to increase granularity:
@@ -159,7 +188,7 @@ impl ValueTree for DeltaDebuggingBitmapValueTree {
                     // Try it "twice as granular".
                     // This is the binary search element that makes this algorithm efficient:
                     self.split_into = min(num_elems, 2 * self.split_into);
-                    self.complement = false;
+                    self.subset = SubsetState::CheckSubset;
                     self.split_index = 0;
                     true
                 } else {
@@ -167,15 +196,7 @@ impl ValueTree for DeltaDebuggingBitmapValueTree {
                     // Nothing else we can do.
                     false
                 }
-            } else {
-                // We went through all split indices once for all subsets.
-                // Checking all of the subsets' complements remains.
-                self.complement = true;
-                self.split_index = 0;
-                true
             }
-        } else {
-            true
         }
     }
 }
