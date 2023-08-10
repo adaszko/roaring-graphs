@@ -6,16 +6,6 @@ pub fn strictly_upper_triangular_matrix_capacity(n: u16) -> u32 {
     (n * n - n) / 2
 }
 
-#[inline]
-pub fn strictly_upper_triangular_matrix_index(row: u16, col: u16, vertex_count: u16) -> u32 {
-    let n = u32::from(vertex_count);
-    let i = u32::from(row);
-    let j = u32::from(col);
-    let lower_nonstrict = strictly_upper_triangular_matrix_capacity(row + 1) + i + 1;
-    // The rectangle i * n minus the left triangle, shifted towards the correct column.
-    i * n + j - lower_nonstrict
-}
-
 pub struct RowColumnIterator {
     size: u16,
     i: u16,
@@ -76,22 +66,22 @@ impl PartialEq for StrictlyUpperTriangularLogicalMatrix {
 // Reference: https://www.intel.com/content/www/us/en/develop/documentation/onemkl-developer-reference-c/top/lapack-routines/matrix-storage-schemes-for-lapack-routines.html
 // Formulas adjusted for indexing from zero.
 #[inline]
-fn index_from_row_column(row: u16, column: u16, size: u16) -> u32 {
+pub(crate) fn index_from_row_column(row: u16, column: u16, size: u16) -> u32 {
     u32::from(row) * u32::from(size) + u32::from(column)
 }
 
 #[inline]
-fn row_from_index(index: u32, size: u16) -> u16 {
+pub(crate) fn row_from_index(index: u32, size: u16) -> u16 {
     u16::try_from(index / u32::from(size)).unwrap()
 }
 
 #[inline]
-fn column_from_index(index: u32, size: u16) -> u16 {
+pub(crate) fn column_from_index(index: u32, size: u16) -> u16 {
     u16::try_from(index % u32::from(size)).unwrap()
 }
 
 #[inline]
-fn row_column_from_index(index: u32, size: u16) -> (u16, u16) {
+pub(crate) fn row_column_from_index(index: u32, size: u16) -> (u16, u16) {
     let row = u16::try_from(index / u32::from(size)).unwrap();
     let column = u16::try_from(index % u32::from(size)).unwrap();
     (row, column)

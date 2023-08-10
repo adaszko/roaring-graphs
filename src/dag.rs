@@ -51,7 +51,6 @@ use std::ops::Range;
 
 use proptest::prelude::*;
 use proptest::strategy::ValueTree;
-use proptest::test_runner::Reason;
 use rand::distributions::Uniform;
 use rand::prelude::Distribution;
 use roaring::RoaringBitmap;
@@ -59,7 +58,7 @@ use roaring::RoaringBitmap;
 use crate::delta_debugging_bitmap::DeltaDebuggingBitmapValueTree;
 use crate::strictly_upper_triangular_logical_matrix::{
     strictly_upper_triangular_matrix_capacity, RowColumnIterator,
-    StrictlyUpperTriangularLogicalMatrix, strictly_upper_triangular_matrix_index,
+    StrictlyUpperTriangularLogicalMatrix, index_from_row_column,
 };
 use crate::{TraversableDirectedGraph, Vertex};
 
@@ -464,11 +463,21 @@ impl Strategy for UniformEdgeProbabilityStrategy {
         }
         let vertex_count =
             Uniform::new(self.vertex_count.start, self.vertex_count.end - 1).sample(runner.rng());
-        let bitmap_size = strictly_upper_triangular_matrix_capacity(vertex_count);
-        let iter = (0..bitmap_size as u32).filter(|_| runner.rng().gen_bool(self.edge_probability));
-        let edge_bitmap =
-            RoaringBitmap::from_sorted_iter(iter).map_err(|e| Reason::from(e.to_string()))?;
-        let vertex_mask = RoaringBitmap::from_sorted_iter(0..vertex_count as u32).unwrap();
+
+        let vertex_mask = {
+            let mut b = RoaringBitmap::new();
+            b.insert_range(0..vertex_count as u32);
+            b
+        };
+        
+        let mut edge_bitmap = RoaringBitmap::new();
+        for i in 0..vertex_count {
+            for j in (i + 1)..vertex_count {
+                if runner.rng().gen_bool(self.edge_probability) {
+                    edge_bitmap.insert(index_from_row_column(i, j, vertex_count));
+                }
+            }
+        }
 
         Ok(DirectedAcyclicGraphValueTree {
             vertex_count,
@@ -496,11 +505,7 @@ impl ValueTree for DirectedAcyclicGraphValueTree {
                 let mut to_dst = from_dst + 1;
                 for to_src in from_src + 1..self.vertex_count {
                     if vertex_mask.contains(to_src as u32) {
-                        let edge_idx = strictly_upper_triangular_matrix_index(
-                            from_src,
-                            to_src,
-                            self.vertex_count,
-                        );
+                        let edge_idx = index_from_row_column(from_src, to_src, self.vertex_count);
                         if edge_map.contains(edge_idx) {
                             edges.push((from_dst, to_dst));
                         }
@@ -511,9 +516,7 @@ impl ValueTree for DirectedAcyclicGraphValueTree {
             }
         }
 
-        let dag =
-            DirectedAcyclicGraph::from_edges_iter(vertex_mask.len() as Vertex, edges.into_iter());
-        dag
+        DirectedAcyclicGraph::from_edges_iter(vertex_mask.len() as Vertex, edges.into_iter())
     }
 
     fn simplify(&mut self) -> bool {
