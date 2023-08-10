@@ -59,12 +59,7 @@ impl PartialEq for StrictlyUpperTriangularLogicalMatrix {
         if self.size != other.size {
             return false;
         }
-        for (r, c) in RowColumnIterator::new(self.size) {
-            if self.get(r, c) != other.get(r, c) {
-                return false;
-            }
-        }
-        true
+        self.iter_ones().eq(other.iter_ones())
     }
 }
 
