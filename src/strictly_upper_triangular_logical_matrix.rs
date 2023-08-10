@@ -6,6 +6,16 @@ pub fn strictly_upper_triangular_matrix_capacity(n: u16) -> u32 {
     (n * n - n) / 2
 }
 
+#[inline]
+pub fn strictly_upper_triangular_matrix_index(row: u16, col: u16, vertex_count: u16) -> u32 {
+    let n = u32::from(vertex_count);
+    let i = u32::from(row);
+    let j = u32::from(col);
+    let lower_nonstrict = strictly_upper_triangular_matrix_capacity(row + 1) + i + 1;
+    // The rectangle i * n minus the left triangle, shifted towards the correct column.
+    i * n + j - lower_nonstrict
+}
+
 pub struct RowColumnIterator {
     size: u16,
     i: u16,

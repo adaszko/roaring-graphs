@@ -59,7 +59,7 @@ use roaring::RoaringBitmap;
 use crate::delta_debugging_bitmap::DeltaDebuggingBitmapValueTree;
 use crate::strictly_upper_triangular_logical_matrix::{
     strictly_upper_triangular_matrix_capacity, RowColumnIterator,
-    StrictlyUpperTriangularLogicalMatrix,
+    StrictlyUpperTriangularLogicalMatrix, strictly_upper_triangular_matrix_index,
 };
 use crate::{TraversableDirectedGraph, Vertex};
 
@@ -467,10 +467,11 @@ impl ValueTree for DirectedAcyclicGraphValueTree {
                 let mut to_dst = from_dst + 1;
                 for to_src in from_src + 1..self.vertex_count {
                     if vertex_mask.contains(to_src as u32) {
-                        let n = self.vertex_count as u32;
-                        let i = from_src as u32;
-                        let j = to_src as u32;
-                        let edge_idx = i * n + j - (((i + 1) * (i + 1) - (i + 1)) / 2 + (i + 1));
+                        let edge_idx = strictly_upper_triangular_matrix_index(
+                            from_src,
+                            to_src,
+                            self.vertex_count,
+                        );
                         if edge_map.contains(edge_idx) {
                             edges.push((from_dst, to_dst));
                         }
