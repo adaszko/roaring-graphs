@@ -1,4 +1,4 @@
-use roaring::{RoaringBitmap, MultiOps};
+use roaring::{MultiOps, RoaringBitmap};
 
 #[inline]
 pub fn strictly_upper_triangular_matrix_capacity(n: u16) -> u32 {
@@ -26,6 +26,9 @@ impl<'a> Iterator for RowColumnIterator {
     type Item = (u16, u16);
 
     fn next(&mut self) -> Option<Self::Item> {
+        if self.size == 0 {
+            return None;
+        }
         let result = (self.i, self.j);
         if self.j < self.size - 1 {
             self.j += 1;
@@ -49,25 +52,36 @@ pub struct StrictlyUpperTriangularLogicalMatrix {
     matrix: RoaringBitmap,
 }
 
+impl Eq for StrictlyUpperTriangularLogicalMatrix {}
+
+impl PartialEq for StrictlyUpperTriangularLogicalMatrix {
+    fn eq(&self, other: &Self) -> bool {
+        if self.size != other.size {
+            return false;
+        }
+        self.iter_ones().eq(other.iter_ones())
+    }
+}
+
 // Reference: https://www.intel.com/content/www/us/en/develop/documentation/onemkl-developer-reference-c/top/lapack-routines/matrix-storage-schemes-for-lapack-routines.html
 // Formulas adjusted for indexing from zero.
 #[inline]
-fn index_from_row_column(row: u16, column: u16, size: u16) -> u32 {
+pub(crate) fn index_from_row_column(row: u16, column: u16, size: u16) -> u32 {
     u32::from(row) * u32::from(size) + u32::from(column)
 }
 
 #[inline]
-fn row_from_index(index: u32, size: u16) -> u16 {
+pub(crate) fn row_from_index(index: u32, size: u16) -> u16 {
     u16::try_from(index / u32::from(size)).unwrap()
 }
 
 #[inline]
-fn column_from_index(index: u32, size: u16) -> u16 {
+pub(crate) fn column_from_index(index: u32, size: u16) -> u16 {
     u16::try_from(index % u32::from(size)).unwrap()
 }
 
 #[inline]
-fn row_column_from_index(index: u32, size: u16) -> (u16, u16) {
+pub(crate) fn row_column_from_index(index: u32, size: u16) -> (u16, u16) {
     let row = u16::try_from(index / u32::from(size)).unwrap();
     let column = u16::try_from(index % u32::from(size)).unwrap();
     (row, column)
@@ -144,6 +158,10 @@ impl StrictlyUpperTriangularLogicalMatrix {
         let mask = RoaringBitmap::from_iter((0..j).map(|k| u32::from(k * self.size + j)));
         let ones_indexes = [&self.matrix, &mask].intersection();
         ones_indexes.into_iter().map(|index| row_from_index(index, self.size))
+    }
+
+    pub fn into_bitset(self) -> RoaringBitmap {
+        self.matrix
     }
 }
 

@@ -47,18 +47,23 @@
 
 use std::collections::VecDeque;
 use std::io::Write;
+use std::ops::Range;
 
 use proptest::prelude::*;
+use proptest::strategy::ValueTree;
+use rand::distributions::Uniform;
+use rand::prelude::Distribution;
 use roaring::RoaringBitmap;
 
+use crate::delta_debugging_bitmap::DeltaDebuggingBitmapValueTree;
 use crate::strictly_upper_triangular_logical_matrix::{
-    self, strictly_upper_triangular_matrix_capacity, StrictlyUpperTriangularLogicalMatrix, RowColumnIterator,
+    strictly_upper_triangular_matrix_capacity, RowColumnIterator,
+    StrictlyUpperTriangularLogicalMatrix, index_from_row_column,
 };
 use crate::{TraversableDirectedGraph, Vertex};
 
-
 /// A mutable, single-threaded directed acyclic graph.
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct DirectedAcyclicGraph {
     adjacency_matrix: StrictlyUpperTriangularLogicalMatrix,
 }
@@ -129,6 +134,17 @@ impl DirectedAcyclicGraph {
 
     /// Construct a DAG from a pre-computed adjacency matrix.
     pub fn from_adjacency_matrix(adjacency_matrix: StrictlyUpperTriangularLogicalMatrix) -> Self {
+        Self { adjacency_matrix }
+    }
+
+    /// Construct a fully connected DAG with given amount of vertices.
+    pub fn fully_connected(vertex_count: Vertex) -> Self {
+        let mut adjacency_matrix = StrictlyUpperTriangularLogicalMatrix::zeroed(vertex_count);
+        for i in 0..vertex_count {
+            for j in (i + 1)..vertex_count {
+                adjacency_matrix.set(i, j);
+            }
+        }
         Self { adjacency_matrix }
     }
 
@@ -388,28 +404,161 @@ impl DirectedAcyclicGraph {
     }
 }
 
-pub fn arb_dag(max_vertex_count: Vertex) -> BoxedStrategy<DirectedAcyclicGraph> {
-    let empty = Just(DirectedAcyclicGraph::new(max_vertex_count)).boxed();
-    let nontrivial = (1..max_vertex_count)
-        .prop_flat_map(|vertex_count| {
-            let max_edges_count =
-                strictly_upper_triangular_logical_matrix::strictly_upper_triangular_matrix_capacity(
-                    vertex_count,
-                );
-            proptest::bits::bool_vec::between(0, max_edges_count.try_into().unwrap()).prop_flat_map(
-                move |boolvec| {
-                    let dag = DirectedAcyclicGraph::from_raw_edges(vertex_count, &boolvec);
-                    Just(dag).boxed()
-                },
-            )
-        })
-        .boxed();
+pub fn arb_dag(vertex_count: impl Into<Range<Vertex>>, edge_probability: f64) -> UniformEdgeProbabilityStrategy {
+    UniformEdgeProbabilityStrategy {
+        vertex_count: vertex_count.into(),
+        edge_probability,
+    }
+}
 
-    prop_oneof![
-        1 => empty,
-        99 => nontrivial
-    ]
-    .boxed()
+#[derive(Debug)]
+pub struct UniformEdgeProbabilityStrategy {
+    vertex_count: Range<Vertex>,
+    edge_probability: f64,
+}
+
+#[derive(Debug)]
+pub struct DirectedAcyclicGraphValueTree {
+    vertex_count: u16,
+    state: ReductionState,
+}
+
+#[derive(Debug)]
+enum ReductionState {
+    ReduceVertices {
+        vertex_mask_tree: DeltaDebuggingBitmapValueTree,
+        edge_bitmap: RoaringBitmap,
+    },
+    ReduceEdges {
+        vertex_mask: RoaringBitmap,
+        edge_bitmap_tree: DeltaDebuggingBitmapValueTree,
+    }
+}
+
+impl ReductionState {
+    fn current_vertex_mask(&self) -> RoaringBitmap {
+        match self {
+            Self::ReduceVertices { vertex_mask_tree, .. } => vertex_mask_tree.current(),
+            Self::ReduceEdges { vertex_mask, .. } => vertex_mask.clone(),
+        }
+    }
+
+    fn current_edge_bitmap(&self) -> RoaringBitmap {
+        match self {
+            Self::ReduceVertices { edge_bitmap, .. } => edge_bitmap.clone(),
+            Self::ReduceEdges { edge_bitmap_tree, .. } => edge_bitmap_tree.current(),
+        }
+    }
+}
+
+impl Strategy for UniformEdgeProbabilityStrategy {
+    type Tree = DirectedAcyclicGraphValueTree;
+
+    type Value = DirectedAcyclicGraph;
+
+    fn new_tree(
+        &self,
+        runner: &mut proptest::test_runner::TestRunner,
+    ) -> proptest::strategy::NewTree<Self> {
+        // Copied out of self.vertex_count.assert_nonempty(), because that's private to proptest
+        if self.vertex_count.is_empty() {
+            panic!(
+                "Invalid use of empty size range. (hint: did you \
+                 accidentally write {}..{} where you meant {}..={} \
+                 somewhere?)",
+                self.vertex_count.start,
+                self.vertex_count.end,
+                self.vertex_count.start,
+                self.vertex_count.end
+            );
+        }
+        let vertex_count =
+            Uniform::new(self.vertex_count.start, self.vertex_count.end - 1).sample(runner.rng());
+
+        let vertex_mask = {
+            let mut b = RoaringBitmap::new();
+            b.insert_range(0..vertex_count as u32);
+            b
+        };
+        
+        let mut edge_bitmap = RoaringBitmap::new();
+        for i in 0..vertex_count {
+            for j in (i + 1)..vertex_count {
+                if runner.rng().gen_bool(self.edge_probability) {
+                    edge_bitmap.insert(index_from_row_column(i, j, vertex_count));
+                }
+            }
+        }
+
+        Ok(DirectedAcyclicGraphValueTree {
+            vertex_count,
+            state: ReductionState::ReduceVertices {
+                vertex_mask_tree: DeltaDebuggingBitmapValueTree::new(vertex_mask),
+                edge_bitmap
+            }
+        })
+    }
+}
+
+impl ValueTree for DirectedAcyclicGraphValueTree {
+    type Value = DirectedAcyclicGraph;
+
+    fn current(&self) -> Self::Value {
+        let vertex_mask = self.state.current_vertex_mask();
+        let edge_map = self.state.current_edge_bitmap();
+
+        let mut from_dst = 0 as Vertex;
+        let mut edges = Vec::with_capacity(strictly_upper_triangular_matrix_capacity(
+            self.vertex_count,
+        ) as usize);
+        for from_src in 0..self.vertex_count {
+            if vertex_mask.contains(from_src as u32) {
+                let mut to_dst = from_dst + 1;
+                for to_src in from_src + 1..self.vertex_count {
+                    if vertex_mask.contains(to_src as u32) {
+                        let edge_idx = index_from_row_column(from_src, to_src, self.vertex_count);
+                        if edge_map.contains(edge_idx) {
+                            edges.push((from_dst, to_dst));
+                        }
+                        to_dst += 1;
+                    }
+                }
+                from_dst += 1;
+            }
+        }
+
+        DirectedAcyclicGraph::from_edges_iter(vertex_mask.len() as Vertex, edges.into_iter())
+    }
+
+    fn simplify(&mut self) -> bool {
+        match &mut self.state {
+            ReductionState::ReduceVertices { vertex_mask_tree, edge_bitmap } => {
+                if !vertex_mask_tree.simplify() {
+                    self.state = ReductionState::ReduceEdges {
+                        vertex_mask: vertex_mask_tree.current(),
+                        edge_bitmap_tree: DeltaDebuggingBitmapValueTree::new(edge_bitmap.clone()),
+                    };
+                }
+                true
+            },
+            ReductionState::ReduceEdges { edge_bitmap_tree, .. } => edge_bitmap_tree.simplify(),
+        }
+    }
+
+    fn complicate(&mut self) -> bool {
+        match &mut self.state {
+            ReductionState::ReduceVertices { vertex_mask_tree, edge_bitmap } => {
+                if !vertex_mask_tree.complicate() {
+                    self.state = ReductionState::ReduceEdges {
+                        vertex_mask: vertex_mask_tree.current(),
+                        edge_bitmap_tree: DeltaDebuggingBitmapValueTree::new(edge_bitmap.clone()),
+                    };
+                }
+                true
+            },
+            ReductionState::ReduceEdges { edge_bitmap_tree, .. } => edge_bitmap_tree.complicate(),
+        }
+    }
 }
 
 /// See [`DirectedAcyclicGraph::iter_vertices_bfs`].
@@ -441,7 +590,12 @@ impl<'a> Iterator for BfsVerticesIterator<'a> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::{BTreeMap, HashSet};
+    use std::{
+        borrow::Borrow,
+        collections::{BTreeMap, HashSet},
+    };
+
+    use proptest::test_runner::{TestCaseResult, TestError, TestRunner};
 
     use super::*;
 
@@ -507,7 +661,7 @@ mod tests {
     proptest! {
         // This mostly ensures `iter_edges()` really returns *all* the edges.
         #[test]
-        fn unblocking_preserves_transitivity(mut dag in arb_dag(25)) {
+        fn unblocking_preserves_transitivity(mut dag in arb_dag(0..25, 0.5)) {
             println!("{:?}", dag);
             let mut edges: Vec<(Vertex, Vertex)> = dag.iter_edges().collect();
             while let Some((left, right)) = edges.pop() {
@@ -691,7 +845,7 @@ mod tests {
     proptest! {
         #[test]
         fn prop_transitive_closure_and_transitive_reduction_intersection_equals_transitive_reduction_modulo_order(
-            dag in arb_dag(25),
+            dag in arb_dag(0..25, 0.5),
         ) {
             println!("{:?}", dag);
             let transitive_closure: HashSet<(Vertex, Vertex)> =
@@ -743,7 +897,7 @@ mod tests {
 
     proptest! {
         #[test]
-        fn traversals_equal_modulo_order(dag in arb_dag(25)) {
+        fn traversals_equal_modulo_order(dag in arb_dag(0..25, 0.5)) {
             let bfs: HashSet<Vertex> = dag.iter_vertices_bfs().collect();
             let dfs: HashSet<Vertex> = dag.iter_vertices_dfs().collect();
             let dfs_post_order: HashSet<Vertex> = dag.iter_vertices_dfs_post_order().collect();
@@ -751,5 +905,57 @@ mod tests {
             prop_assert_eq!(&dfs_post_order, &dfs);
             prop_assert_eq!(&dfs_post_order, &bfs);
         }
+    }
+
+    /// A pseudo-test-case that fails on DAGs that contain a node with two ancestors
+    fn fail_on_two_incoming(dag: impl Borrow<DirectedAcyclicGraph>) -> TestCaseResult {
+        for to in 0..dag.borrow().get_vertex_count() {
+            let mut count = 0;
+            for from in 0..to {
+                count += dag.borrow().get_edge(from, to) as u32;
+                if count >= 2 {
+                    return Err(TestCaseError::Fail(
+                        "contains an edge with two incoming".into(),
+                    ));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn minify_dag_to_3_nodes() {
+        // This is the minimal DAG that has a node with two ancestors
+        let minimal_dag = DirectedAcyclicGraph::from_edges_iter(3, vec![(0, 2), (1, 2)].into_iter());
+        assert!(fail_on_two_incoming(&minimal_dag).is_err());
+
+        // We construct a fully-connected DAG of 10 vertices
+        let vertex_count = 10;
+        let edge_bitmap = DirectedAcyclicGraph::fully_connected(vertex_count).adjacency_matrix.into_bitset();
+        let vertex_mask = {
+            let mut b = RoaringBitmap::new();
+            b.insert_range(0..vertex_count as u32);
+            b
+        };
+
+        let full_graph_tree = DirectedAcyclicGraphValueTree {
+            vertex_count,
+            state: ReductionState::ReduceVertices {
+                vertex_mask_tree: DeltaDebuggingBitmapValueTree::new(vertex_mask),
+                edge_bitmap,
+            },
+        };
+
+        let mut runner = TestRunner::new(Default::default());
+        let result = runner.run_one(full_graph_tree, fail_on_two_incoming);
+
+        // After running the shrinker, the DAG should be exactly the minimal DAG:
+        assert_eq!(
+            result,
+            Err(TestError::Fail(
+                "contains an edge with two incoming".into(),
+                minimal_dag
+            ))
+        );
     }
 }

@@ -583,7 +583,7 @@ mod tests {
         }
 
         #[test]
-        fn arb_dag_has_no_cycle(dag in arb_dag(100)) {
+        fn arb_dag_has_no_cycle(dag in arb_dag(0..100, 0.5)) {
             let digraph = DirectedGraph::from_dag(&dag);
             prop_assert!(digraph.get_topologically_ordered_vertices().is_some());
         }
