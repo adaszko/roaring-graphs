@@ -420,6 +420,7 @@ pub struct UniformEdgeProbabilityStrategy {
 #[derive(Debug)]
 pub struct DirectedAcyclicGraphValueTree {
     vertex_count: u16,
+    min_vertex_count: u16,
     state: ReductionState,
 }
 
@@ -492,10 +493,11 @@ impl Strategy for UniformEdgeProbabilityStrategy {
 
         Ok(DirectedAcyclicGraphValueTree {
             vertex_count,
+            min_vertex_count: self.vertex_count.start,
             state: ReductionState::ReduceVertices {
                 vertex_mask_tree: DeltaDebuggingBitmapValueTree::new(vertex_mask),
-                edge_bitmap
-            }
+                edge_bitmap,
+            },
         })
     }
 }
@@ -533,7 +535,16 @@ impl ValueTree for DirectedAcyclicGraphValueTree {
     fn simplify(&mut self) -> bool {
         match &mut self.state {
             ReductionState::ReduceVertices { vertex_mask_tree, edge_bitmap } => {
-                if !vertex_mask_tree.simplify() {
+                if vertex_mask_tree.simplify() {
+                    loop {
+                        if vertex_mask_tree.current().len() >= self.min_vertex_count as u64 {
+                            break;
+                        }
+                        if !vertex_mask_tree.complicate() {
+                            return false;
+                        }
+                    }
+                } else {
                     self.state = ReductionState::ReduceEdges {
                         vertex_mask: vertex_mask_tree.current(),
                         edge_bitmap_tree: DeltaDebuggingBitmapValueTree::new(edge_bitmap.clone()),
@@ -548,7 +559,16 @@ impl ValueTree for DirectedAcyclicGraphValueTree {
     fn complicate(&mut self) -> bool {
         match &mut self.state {
             ReductionState::ReduceVertices { vertex_mask_tree, edge_bitmap } => {
-                if !vertex_mask_tree.complicate() {
+                if vertex_mask_tree.complicate() {
+                    loop {
+                        if vertex_mask_tree.current().len() >= self.min_vertex_count as u64 {
+                            break;
+                        }
+                        if !vertex_mask_tree.complicate() {
+                            return false;
+                        }
+                    }
+                } else {
                     self.state = ReductionState::ReduceEdges {
                         vertex_mask: vertex_mask_tree.current(),
                         edge_bitmap_tree: DeltaDebuggingBitmapValueTree::new(edge_bitmap.clone()),
@@ -940,6 +960,7 @@ mod tests {
 
         let full_graph_tree = DirectedAcyclicGraphValueTree {
             vertex_count,
+            min_vertex_count: 0,
             state: ReductionState::ReduceVertices {
                 vertex_mask_tree: DeltaDebuggingBitmapValueTree::new(vertex_mask),
                 edge_bitmap,
@@ -957,5 +978,37 @@ mod tests {
                 minimal_dag
             ))
         );
+    }
+
+    proptest! {
+        #[test]
+        fn minifies_to_min_size(a in 0u16..100, b in 0u16..100) {
+            // We construct a fully-connected DAG of 10 vertices
+            let vertex_count = std::cmp::max(a, b);
+            let min_vertex_count = std::cmp::min(a, b);
+            let edge_bitmap = DirectedAcyclicGraph::fully_connected(vertex_count).adjacency_matrix.into_bitset();
+            let vertex_mask = {
+                let mut b = RoaringBitmap::new();
+                b.insert_range(0..vertex_count as u32);
+                b
+            };
+
+            let full_graph_tree = DirectedAcyclicGraphValueTree {
+                vertex_count,
+                min_vertex_count,
+                state: ReductionState::ReduceVertices {
+                    vertex_mask_tree: DeltaDebuggingBitmapValueTree::new(vertex_mask),
+                    edge_bitmap,
+                },
+            };
+
+            let mut runner = TestRunner::new(Default::default());
+            let result = runner.run_one(full_graph_tree, |_| Err(TestCaseError::Fail("always fails".into())));
+
+            let Err(TestError::Fail(_, dag)) = result else {
+                panic!("Expected test error, got {result:?}");
+            };
+            assert_eq!(dag.get_vertex_count(), min_vertex_count);
+        }
     }
 }
